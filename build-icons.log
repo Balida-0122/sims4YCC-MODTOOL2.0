@@ -1,0 +1,28 @@
+[INFO] 找到图标: C:\Users\32053\Desktop\YCC.png
+[INFO] 原始尺寸: 917x917  格式: png
+[INFO] 开始生成各尺寸 PNG...
+[INFO]   生成 icon-16x16.png
+[INFO]   生成 icon-24x24.png
+[INFO]   生成 icon-32x32.png
+[INFO]   生成 icon-48x48.png
+[INFO]   生成 icon-64x64.png
+[INFO]   生成 icon-128x128.png
+[INFO]   生成 icon-256x256.png
+[INFO]   生成 icon-512x512.png
+[WARN] 原图小于 1024x1024，将放大
+[INFO]   生成 icon-1024x1024.png
+[INFO] 共生成 9 个 PNG 文件
+[INFO] 开始生成 icon.ico ...
+[INFO]   使用 7 个 PNG 合成 ICO
+[INFO]   icon.ico 生成成功 (372526 bytes)
+[INFO] 开始生成 icon.icns ...
+[INFO]   icon.icns 生成成功 (3419075 bytes, 10 条目)
+[INFO] 开始生成 icon.iconset/ ...
+[INFO]   icon.iconset/ 生成 10/10 个文件
+[INFO] 
+[INFO] ============== RESULT ==============
+[INFO] icon.ico  : exists=true  size=372526 bytes
+[INFO] icon.icns : exists=true  size=3419075 bytes
+[INFO] icon.iconset : 10/10 files in C:\Users\32053\Desktop\SimsYCC\build\icon.iconset
+[INFO] Win 打包就绪 : YES
+[INFO] ====================================

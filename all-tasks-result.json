@@ -1,0 +1,168 @@
+{
+  "task1": {
+    "exitCode": 0,
+    "last100Lines": [
+      "[INFO] 找到图标: C:\\Users\\32053\\Desktop\\YCC.png",
+      "[INFO] 原始尺寸: 917x917  格式: png",
+      "[INFO] 开始生成各尺寸 PNG...",
+      "[INFO]   生成 icon-16x16.png",
+      "[INFO]   生成 icon-24x24.png",
+      "[INFO]   生成 icon-32x32.png",
+      "[INFO]   生成 icon-48x48.png",
+      "[INFO]   生成 icon-64x64.png",
+      "[INFO]   生成 icon-128x128.png",
+      "[INFO]   生成 icon-256x256.png",
+      "[INFO]   生成 icon-512x512.png",
+      "[WARN] 原图小于 1024x1024，将放大",
+      "[INFO]   生成 icon-1024x1024.png",
+      "[INFO] 共生成 9 个 PNG 文件",
+      "[INFO] 开始生成 icon.ico ...",
+      "[INFO]   使用 7 个 PNG 合成 ICO",
+      "[INFO]   icon.ico 生成成功 (372526 bytes)",
+      "[INFO] 开始生成 icon.icns ...",
+      "[INFO]   icon.icns 生成成功 (3419075 bytes, 10 条目)",
+      "[INFO] 开始生成 icon.iconset/ ...",
+      "[INFO]   icon.iconset/ 生成 10/10 个文件",
+      "[INFO] ",
+      "[INFO] ============== RESULT ==============",
+      "[INFO] icon.ico  : exists=true  size=372526 bytes",
+      "[INFO] icon.icns : exists=true  size=3419075 bytes",
+      "[INFO] icon.iconset : 10/10 files in C:\\Users\\32053\\Desktop\\SimsYCC\\build\\icon.iconset",
+      "[INFO] Win 打包就绪 : YES",
+      "[INFO] ===================================="
+    ],
+    "totalLines": 28
+  },
+  "task2": {
+    "files": [
+      {
+        "path": "build-icons.log",
+        "size": 1102,
+        "isDir": false
+      },
+      {
+        "path": "icon-1024x1024.png",
+        "size": 1915898,
+        "isDir": false
+      },
+      {
+        "path": "icon-128x128.png",
+        "size": 43041,
+        "isDir": false
+      },
+      {
+        "path": "icon-16x16.png",
+        "size": 942,
+        "isDir": false
+      },
+      {
+        "path": "icon-24x24.png",
+        "size": 1957,
+        "isDir": false
+      },
+      {
+        "path": "icon-256x256.png",
+        "size": 155012,
+        "isDir": false
+      },
+      {
+        "path": "icon-32x32.png",
+        "size": 3311,
+        "isDir": false
+      },
+      {
+        "path": "icon-48x48.png",
+        "size": 7005,
+        "isDir": false
+      },
+      {
+        "path": "icon-512x512.png",
+        "size": 565251,
+        "isDir": false
+      },
+      {
+        "path": "icon-64x64.png",
+        "size": 11958,
+        "isDir": false
+      },
+      {
+        "path": "icon.icns",
+        "size": 3419075,
+        "isDir": false
+      },
+      {
+        "path": "icon.ico",
+        "size": 372526,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset/",
+        "size": 0,
+        "isDir": true
+      },
+      {
+        "path": "icon.iconset\\icon_128x128.png",
+        "size": 43041,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_128x128@2x.png",
+        "size": 155012,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_16x16.png",
+        "size": 942,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_16x16@2x.png",
+        "size": 3311,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_256x256.png",
+        "size": 155012,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_256x256@2x.png",
+        "size": 565251,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_32x32.png",
+        "size": 3311,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_32x32@2x.png",
+        "size": 11958,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_512x512.png",
+        "size": 565251,
+        "isDir": false
+      },
+      {
+        "path": "icon.iconset\\icon_512x512@2x.png",
+        "size": 1915898,
+        "isDir": false
+      }
+    ],
+    "icoExists": true,
+    "icoSize": 372526,
+    "icnsExists": true,
+    "icnsSize": 3419075,
+    "iconsetComplete10": true
+  },
+  "task3": {
+    "executed": false,
+    "success": false,
+    "finalIcnsSize": -1,
+    "error": null,
+    "rebuildAttempted": false
+  },
+  "canContinueWinBuild": true
+}
