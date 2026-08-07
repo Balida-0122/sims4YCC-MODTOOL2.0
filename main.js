@@ -9,6 +9,25 @@ const { exec } = require('child_process');
 const DATA_FILE = path.join(app.getPath('userData'), 'sims4ycc-state.json');
 const OPER_LOG = path.join(__dirname, 'operations.log');
 
+// ============ 跨平台工具函数 ============
+/**
+ * 路径归一化：统一为正斜杠，用于字符串比较/匹配（磁盘操作仍用 path.join/path.sep）
+ */
+function normalizePath(p) {
+  if (!p) return '';
+  return String(p).replace(/\\/g, '/');
+}
+/**
+ * 跨平台判断 filePath 是否锚定：同时比较 path.sep 和归一化后的正斜杠
+ */
+function isFileAnchored(filePath) {
+  const fp = normalizePath(filePath);
+  return state.anchored.some(a => {
+    const na = normalizePath(a);
+    return fp === na || fp.startsWith(na + '/');
+  });
+}
+
 // ============ 操作日志 ============
 function opLog(action, detail) {
   try {
@@ -98,6 +117,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     title: 'Sims4YCC MOD 管理工具',
+    icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -751,9 +771,9 @@ ipcMain.handle('scan-duplicates', async () => {
   return { groups, totalDuplicates: groups.reduce((s, g) => s + g.files.length - 1, 0) };
 });
 
-function isFileAnchored(filePath) {
-  return state.anchored.some(a => filePath.startsWith(a + path.sep) || filePath === a);
-}
+// 旧版本 isFileAnchored（硬编码 path.sep，macOS 下 Windows 保存的锚定会失效）
+// 已在顶部用 normalizePath 版本替换，保留此处占位避免重复声明（删除即可）
+
 
 ipcMain.handle('mark-keep', async (event, paths) => {
   for (const p of paths) {

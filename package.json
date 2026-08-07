@@ -1,6 +1,6 @@
 {
   "name": "sims4ycc-modtool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sims 4 MOD 管理工具",
   "main": "main.js",
   "author": "Sims4YCC",
@@ -54,7 +54,7 @@
       ],
       "icon": "build/icon.ico",
       "artifactName": "${productName} Setup ${version}.${ext}",
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "verifyUpdateCodeSignature": false
     },
     "nsis": {
@@ -78,10 +78,18 @@
       ],
       "icon": "build/icon.icns",
       "category": "public.app-category.utilities",
+      "type": "distribution",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "notarize": false,
-      "electronLanguages": ["en", "zh_CN", "zh_TW"]
+      "electronLanguages": ["en", "zh_CN", "zh_TW"],
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "需要访问桌面文件夹，以便读取 Sims 4 Mods 文件夹内容",
+        "NSDocumentsFolderUsageDescription": "需要访问文稿文件夹，以便读取 Sims 4 Mods 文件夹内容",
+        "NSDownloadsFolderUsageDescription": "需要访问下载文件夹，以便读取 Sims 4 Mods 文件夹内容",
+        "NSRemovableVolumesUsageDescription": "需要访问外接磁盘，以便读取位于移动存储中的 Sims 4 Mods",
+        "NSRequiresAquaSystemAppearance": false
+      }
     },
     "dmg": {
       "contents": [
