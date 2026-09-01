@@ -5,6 +5,7 @@ const fsp = require('fs').promises;
 const crypto = require('crypto');
 const https = require('https');
 const { exec } = require('child_process');
+const { Worker } = require('worker_threads');
 
 const DATA_FILE = path.join(app.getPath('userData'), 'sims4ycc-state.json');
 const OPER_LOG = path.join(__dirname, 'operations.log');
@@ -48,6 +49,8 @@ let state = {
   categories: defaultCategories(),
   damagedFiles: [],         // 损坏检测结果: [{path, reason, detail, level}]
   strictMode: false,        // 完整性检测严格模式（默认关闭，使用综合实用型检测）
+  conflictDeleteMode: 'auto', // 冲突删除默认模式: auto | manual
+  lastDeleteBackupKey: null,// 最近一次删除备份目录 key（用于撤销）
   translationConfig: {      // 翻译服务配置
     service: 'libretranslate',        // 服务商：libretranslate | deepseek | custom
     apiUrl: 'https://libretranslate.com/translate', // API 地址
@@ -902,228 +905,482 @@ function getConflictImpact(conflictType, resourceType) {
   };
 }
 
-// ============ IPC: 冲突检测 ============
+// ============ IPC: 冲突检测（worker_threads，不阻塞主进程） ============
 ipcMain.handle('scan-conflicts', async () => {
   if (!state.scanResults) return { error: '请先执行深度扫描' };
-  const files = state.scanResults.files.filter(f => f.ext === '.package');
-
-  // 作者提取缓存
-  const authorCache = {};
-  function getAuthor(filePath) {
-    if (!authorCache[filePath]) {
-      // 优先复用扫描结果中的 author
-      const fileEntry = state.scanResults.files.find(f => f.path === filePath);
-      authorCache[filePath] = fileEntry && fileEntry.author ? fileEntry.author : extractAuthor(filePath);
-    }
-    return authorCache[filePath];
+  const packageFiles = state.scanResults.files
+    .filter(f => f && f.path && (f.ext === '.package' || f.ext === '.ts4script'));
+  if (packageFiles.length === 0) {
+    return { conflicts: [], total: 0 };
   }
 
-  // 提取每个 package 的 TGI 键
-  const fileTGI = {}; // file -> Set of "type:group:instance"
-  const ts4scriptPaths = new Set();
-  // 识别含 .ts4script 的文件夹（用于脚本重写检测）
-  for (const p of (state.scanResults.ts4scriptFolders || [])) {
-    ts4scriptPaths.add(p.toLowerCase().replace(/\\/g, '/'));
-  }
-
-  for (const f of files) {
+  const workerPath = path.join(__dirname, 'src', 'workers', 'conflict-worker.js');
+  return new Promise((resolve, reject) => {
+    let worker;
+    let timer;
     try {
-      const buf = fs.readFileSync(f.path);
-      const parsed = parsePackage(buf);
-      if (parsed && parsed.entries.length > 0) {
-        const keys = new Set();
-        for (const e of parsed.entries) {
-          keys.add(`${e.type}:${e.group}:${e.instance}`);
-        }
-        fileTGI[f.path] = keys;
+      worker = new Worker(workerPath, {
+        resourceLimits: { maxOldGenerationSizeMb: 4096 },
+      });
+    } catch (e) {
+      return reject(new Error('创建冲突检测 Worker 失败: ' + e.message));
+    }
+
+    timer = setTimeout(() => {
+      try { worker.terminate(); } catch {}
+      resolve({ error: '冲突检测超时（超过 15 分钟），请分批扫描' });
+    }, 15 * 60 * 1000);
+
+    const sendProgress = (payload) => {
+      try { mainWindow && mainWindow.webContents.send('conflict-progress', payload); } catch {}
+    };
+
+    worker.on('message', (msg) => {
+      if (!msg || !msg.type) return;
+      if (msg.type === 'progress') {
+        sendProgress(msg);
+      } else if (msg.type === 'done') {
+        clearTimeout(timer);
+        try { worker.terminate(); } catch {}
+        // 结果存入本地，供后续删除流程读取
+        state.lastConflictSnapshot = {
+          total: msg.total,
+          skippedFiles: msg.skippedFiles || [],
+          scannedAt: Date.now(),
+        };
+        resolve({
+          conflicts: msg.conflicts || [],
+          total: msg.total || 0,
+          skippedFiles: msg.skippedFiles || [],
+        });
+      } else if (msg.type === 'error') {
+        clearTimeout(timer);
+        try { worker.terminate(); } catch {}
+        resolve({ error: msg.message || '冲突检测失败', stack: msg.stack || '' });
       }
-    } catch (e) {}
-  }
-
-  // 按资源键分组，找出冲突
-  const keyToFiles = {};
-  const keyToResourceType = {};
-  for (const [filePath, keys] of Object.entries(fileTGI)) {
-    for (const k of keys) {
-      if (!keyToFiles[k]) keyToFiles[k] = [];
-      keyToFiles[k].push(filePath);
-      keyToResourceType[k] = k.split(':')[0];
-    }
-  }
-
-  // 同名文件冲突（不同位置的相同文件名）
-  const byName = {};
-  for (const f of files) {
-    const name = f.name.toLowerCase();
-    if (!byName[name]) byName[name] = [];
-    byName[name].push(f.path);
-  }
-
-  const conflicts = [];
-  let conflictId = 0;
-
-  // TGI 资源冲突
-  for (const [key, fileList] of Object.entries(keyToFiles)) {
-    if (fileList.length > 1) {
-      const conflictKey = `tgi:${key}`;
-      if (state.whitelist.includes(conflictKey)) continue;
-      const [type, group, instance] = key.split(':');
-      const anchoredCount = fileList.filter(isFileAnchored).length;
-
-      const authors = fileList.map(getAuthor).filter(a => a !== '未知');
-      const uniqueAuthors = [...new Set(authors)];
-      const sameAuthor = uniqueAuthors.length === 1 && authors.length === fileList.length;
-
-      // 含 .ts4script 文件夹内的参与方
-      const ts4scriptConflicting = fileList.some(p => {
-        const pn = p.replace(/\\/g, '/').toLowerCase();
-        for (const tp of ts4scriptPaths) { if (pn.startsWith(tp + '/')) return true; }
-        return false;
-      });
-      const impactInfo = getConflictImpact('tgi', type);
-      let conflictType = impactInfo.typeName;
-      if (ts4scriptConflicting) conflictType = '脚本模组资源覆盖 / 功能冲突';
-
-      const mtimes = fileList.map(p => {
-        const fe = state.scanResults.files.find(f => f.path === p);
-        return fe ? fe.mtime : '';
-      });
-      let suggestion = impactInfo.suggestion;
-      if (sameAuthor) {
-        suggestion = '作者相同，可能为版本更迭，建议保留最新版本';
+    });
+    worker.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ error: 'Worker 异常: ' + (e && e.message ? e.message : String(e)) });
+    });
+    worker.on('exit', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        resolve({ error: `Worker 非正常退出 (code=${code})` });
       }
+    });
 
-      const conflictPairDescription = fileList.slice(0, 2).map(p => `${path.basename(p)}（作者：${getAuthor(p)}）`).join(' 与 ');
-
-      conflicts.push({
-        id: conflictId++,
-        key: conflictKey,
-        type: 'tgi',
-        resourceType: type,
-        resourceGroup: group,
-        instance,
-        conflictType,
-        conflictSeverity: impactInfo.severity,
-        impact: impactInfo.impact,
-        suggestion,
-        sameAuthor,
-        commonAuthor: sameAuthor ? uniqueAuthors[0] : null,
-        conflictPair: conflictPairDescription,
-        files: fileList.map(p => ({
-          path: p,
-          name: path.basename(p),
-          author: getAuthor(p),
-          mtime: mtimes[fileList.indexOf(p)],
-          anchored: isFileAnchored(p),
-        })),
-        detail: `${conflictPairDescription} 产生资源类型 ${type.toUpperCase()} 的 ${conflictType}`,
-        hasAnchored: anchoredCount > 0,
+    // 发送启动消息
+    try {
+      worker.postMessage({
+        cmd: 'start',
+        payload: {
+          files: packageFiles.map(f => ({
+            path: f.path,
+            name: f.name,
+            ext: f.ext,
+            size: f.size,
+            mtime: f.mtime,
+            author: f.author || extractAuthor(f.path),
+          })),
+          ts4scriptFolders: state.scanResults.ts4scriptFolders || [],
+          whitelist: state.whitelist || [],
+          anchoredPaths: state.anchored || [],
+        },
       });
+    } catch (e) {
+      clearTimeout(timer);
+      try { worker.terminate(); } catch {}
+      resolve({ error: '发送 Worker 消息失败: ' + e.message });
     }
-  }
-
-  // 同名文件冲突
-  for (const [name, fileList] of Object.entries(byName)) {
-    if (fileList.length > 1) {
-      const conflictKey = `name:${name}`;
-      if (state.whitelist.includes(conflictKey)) continue;
-      const authors = fileList.map(getAuthor).filter(a => a !== '未知');
-      const uniqueAuthors = [...new Set(authors)];
-      const sameAuthor = uniqueAuthors.length === 1 && authors.length === fileList.length;
-
-      const ts4scriptConflicting = fileList.some(p => {
-        const pn = p.replace(/\\/g, '/').toLowerCase();
-        for (const tp of ts4scriptPaths) { if (pn.startsWith(tp + '/')) return true; }
-        return false;
-      });
-
-      let conflictType = ts4scriptConflicting ? '脚本模组同名覆盖' : '同名文件冲突';
-      const impactInfo = getConflictImpact('name', null);
-      let suggestion = impactInfo.suggestion;
-      if (sameAuthor) suggestion = '作者相同，可能为版本更迭，建议保留最新版本';
-
-      const conflictPairDescription = fileList.slice(0, 2).map(p => `${path.basename(p)}（作者：${getAuthor(p)}）`).join(' 与 ');
-
-      conflicts.push({
-        id: conflictId++,
-        key: conflictKey,
-        type: 'name',
-        conflictType,
-        conflictSeverity: 'low',
-        impact: impactInfo.impact,
-        suggestion,
-        sameAuthor,
-        commonAuthor: sameAuthor ? uniqueAuthors[0] : null,
-        conflictPair: conflictPairDescription,
-        files: fileList.map(p => ({
-          path: p,
-          name: path.basename(p),
-          author: getAuthor(p),
-          anchored: isFileAnchored(p),
-        })),
-        detail: `${conflictPairDescription} 在不同位置存在同名文件 "${name}"`,
-        hasAnchored: fileList.some(isFileAnchored),
-      });
-    }
-  }
-
-  return { conflicts, total: conflicts.length };
+  });
 });
 
-// ============ IPC: 删除冲突文件（及其所在独立文件夹） ============
+// ============ 冲突删除：工具函数 ============
+/**
+ * 返回备份目录：<modsRoot>/_deleted_backup/<YYYYMMDD_HHmmss>/
+ *   内部按相对路径保持文件夹结构
+ */
+function getBackupDir(modsRoot) {
+  if (!modsRoot) return null;
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dirName = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+  return path.join(modsRoot, '_deleted_backup', dirName);
+}
+
+/**
+ * 将 src（文件或目录）备份到 backupDir 下对应的相对路径，保持 modsRoot 下原结构
+ *   src 绝对路径, modsRoot 绝对路径, backupDir 绝对路径
+ * 返回 { ok, backupAbsPath, backupRelKey } 或抛出错误
+ */
+function backupOneEntry(src, modsRoot, backupDir) {
+  if (!modsRoot || !src) throw new Error('参数缺失');
+  const np = normalizePath(src);
+  const nr = normalizePath(modsRoot);
+  if (!np.startsWith(nr + '/') && np !== nr) {
+    // 文件不在 Mods 目录内：备份到 backupDir/_outside_/<basename>
+    const base = path.basename(src);
+    const dest = path.join(backupDir, '_outside_', base);
+    const destDir = path.dirname(dest);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    if (fs.statSync(src).isDirectory()) {
+      fs.cpSync(src, dest, { recursive: true, force: true });
+    } else {
+      fs.copyFileSync(src, dest);
+    }
+    return { ok: true, backupAbsPath: dest, backupRelKey: path.join('_outside_', base) };
+  }
+  const rel = path.relative(modsRoot, src);
+  const dest = path.join(backupDir, rel);
+  const destDir = path.dirname(dest);
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+  const st = fs.statSync(src);
+  if (st.isDirectory()) {
+    fs.cpSync(src, dest, { recursive: true, force: true });
+  } else {
+    fs.copyFileSync(src, dest);
+  }
+  return { ok: true, backupAbsPath: dest, backupRelKey: rel };
+}
+
+/**
+ * 通用删除 + 备份
+ *   opts: {
+ *     targetPaths: string[] - 绝对路径，可以是文件或文件夹
+ *     mode: 'auto' | 'manual'
+ *     operatorDetail?: string
+ *   }
+ * 返回 { ok, backupKey, results: [{path, ok, backupRel, error}], ... }
+ */
+function deleteWithBackupSync(opts) {
+  if (!state.modsFolder) throw new Error('未设置 Mods 文件夹');
+  if (!opts || !Array.isArray(opts.targetPaths) || opts.targetPaths.length === 0) {
+    return { ok: false, error: '未提供删除目标' };
+  }
+  // 1. 过滤锚定
+  const todo = [];
+  const skippedAnchored = [];
+  for (const p of opts.targetPaths) {
+    if (isFileAnchored(p)) {
+      skippedAnchored.push(p);
+      continue;
+    }
+    if (p && fs.existsSync(p)) todo.push(p);
+  }
+  if (todo.length === 0) {
+    return { ok: false, error: '无可删除目标（全部已锚定或不存在）', skippedAnchored };
+  }
+
+  // 2. 计算独立文件夹删除（与之前 delete-conflict-file 行为一致）
+  const modsRoot = state.modsFolder;
+  const resolved = []; // [{ path, isFolder, deleteFolder }]
+  for (const p of todo) {
+    let st;
+    try { st = fs.statSync(p); } catch { continue; }
+    if (!st.isFile()) {
+      // 非文件：用户指定的是文件夹 → 直接删文件夹
+      resolved.push({ path: p, isFolder: true, deleteFolder: true });
+      continue;
+    }
+    const parentDir = path.dirname(p);
+    let deleteFolder = false;
+    if (parentDir !== modsRoot) {
+      try {
+        const sibs = fs.readdirSync(parentDir);
+        if (sibs.length <= 1) {
+          deleteFolder = true;
+        } else {
+          const basePrefix = path.basename(p, path.extname(p)).toLowerCase().replace(/[_-]?[v\d.]+$/, '');
+          const sliceLen = Math.max(4, Math.floor(basePrefix.length * 0.5));
+          let allRelated = true;
+          for (const s of sibs) {
+            const ext = path.extname(s).toLowerCase();
+            if (ext === '.package' || ext === '.ts4script') {
+              const name = s.toLowerCase().slice(0, -ext.length);
+              if (!name.startsWith(basePrefix.slice(0, sliceLen))) {
+                allRelated = false;
+                break;
+              }
+            }
+          }
+          if (allRelated && sibs.length <= 12) deleteFolder = true;
+        }
+      } catch { deleteFolder = false; }
+    }
+    resolved.push({
+      path: p,
+      isFolder: false,
+      deleteFolder,
+      folderPath: deleteFolder ? parentDir : null,
+    });
+  }
+
+  // 3. 去重：避免同一文件夹被重复删
+  const uniqueDeleteTargets = [];
+  const seenFolder = new Set();
+  const seenFile = new Set();
+  for (const r of resolved) {
+    if (r.deleteFolder && r.folderPath) {
+      if (!seenFolder.has(r.folderPath)) {
+        seenFolder.add(r.folderPath);
+        uniqueDeleteTargets.push({ type: 'folder', path: r.folderPath, srcFile: r.path });
+      }
+    } else {
+      if (!seenFile.has(r.path)) {
+        seenFile.add(r.path);
+        uniqueDeleteTargets.push({ type: 'file', path: r.path });
+      }
+    }
+  }
+
+  // 4. 备份 + 记录
+  const backupDir = getBackupDir(modsRoot);
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+  const backupKey = path.relative(modsRoot, backupDir); // 相对 key，撤销时用
+  const manifest = [];
+  const results = [];
+
+  for (const t of uniqueDeleteTargets) {
+    try {
+      const backupInfo = backupOneEntry(t.path, modsRoot, backupDir);
+      // 真正删除
+      const st = fs.statSync(t.path);
+      if (st.isDirectory()) {
+        fs.rmSync(t.path, { recursive: true, force: true, maxRetries: 2 });
+      } else {
+        fs.unlinkSync(t.path);
+      }
+      manifest.push({
+        absPath: t.path,
+        backupRel: backupInfo.backupRelKey,
+        backupAbs: backupInfo.backupAbsPath,
+        type: t.type,
+        isDir: st.isDirectory(),
+        srcFile: t.srcFile || null,
+      });
+      opLog('DELETE_CONFLICT_BATCH', `${opts.mode || 'manual'}: ${t.path} -> 备份到 ${backupInfo.backupRelKey}`);
+      results.push({ path: t.path, ok: true, backupRel: backupInfo.backupRelKey });
+    } catch (e) {
+      results.push({ path: t.path, ok: false, error: (e && e.message) ? e.message.slice(0, 300) : String(e) });
+      opLog('DELETE_CONFLICT_BATCH_ERR', `${t.path}: ${(e && e.message) || e}`);
+    }
+  }
+  // 写 manifest.json
+  try {
+    fs.writeFileSync(
+      path.join(backupDir, 'manifest.json'),
+      JSON.stringify({
+        mode: opts.mode || 'manual',
+        time: new Date().toISOString(),
+        modsFolder: modsRoot,
+        operatorDetail: opts.operatorDetail || '',
+        manifest,
+      }, null, 2),
+      'utf8'
+    );
+  } catch {}
+
+  // 5. 清理本地索引中的已删除条目
+  const allDeletedPaths = new Set();
+  for (const r of results) {
+    if (!r.ok) continue;
+    if (fs.existsSync(r.path)) {
+      // 删文件夹的情况下，尝试收集子路径
+      continue;
+    }
+    allDeletedPaths.add(r.path);
+  }
+  if (allDeletedPaths.size > 0 && state.scanResults) {
+    state.scanResults.files = state.scanResults.files.filter(f => !allDeletedPaths.has(f.path));
+  }
+  for (const p of allDeletedPaths) {
+    delete state.classifications[p];
+    state.keepList = state.keepList.filter(x => x !== p);
+  }
+  // 记录最近一次备份 key，用于撤销
+  state.lastDeleteBackupKey = backupKey;
+  saveState();
+
+  const okCount = results.filter(r => r.ok).length;
+  return {
+    ok: true,
+    backupKey,
+    backupDir,
+    total: results.length,
+    deletedCount: okCount,
+    skippedAnchored,
+    results,
+  };
+}
+
+/**
+ * 撤销最近一次删除：根据 lastDeleteBackupKey + manifest 还原
+ */
+function undoLastDeleteSync() {
+  if (!state.modsFolder) return { ok: false, error: '未设置 Mods 文件夹' };
+  if (!state.lastDeleteBackupKey) return { ok: false, error: '没有可撤销的删除操作' };
+  const backupDir = path.join(state.modsFolder, state.lastDeleteBackupKey);
+  if (!fs.existsSync(backupDir)) return { ok: false, error: '备份目录不存在' };
+  const manifestPath = path.join(backupDir, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return { ok: false, error: 'manifest 不存在' };
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return { ok: false, error: 'manifest 解析失败' };
+  }
+  const entries = Array.isArray(manifest.manifest) ? manifest.manifest : [];
+  const results = [];
+  for (const e of entries) {
+    try {
+      const from = e.backupAbs || path.join(backupDir, e.backupRel);
+      const to = e.absPath;
+      if (!fs.existsSync(from)) {
+        results.push({ path: to, ok: false, error: '备份缺失' });
+        continue;
+      }
+      const parent = path.dirname(to);
+      if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+      const st = fs.statSync(from);
+      if (st.isDirectory()) {
+        fs.cpSync(from, to, { recursive: true, force: true });
+        fs.rmSync(from, { recursive: true, force: true });
+      } else {
+        fs.copyFileSync(from, to);
+        fs.unlinkSync(from);
+      }
+      opLog('UNDO_DELETE', `还原: ${to} <- ${e.backupRel}`);
+      results.push({ path: to, ok: true });
+    } catch (err) {
+      results.push({ path: e.absPath, ok: false, error: (err && err.message) ? err.message.slice(0, 300) : String(err) });
+    }
+  }
+  // 清空状态
+  state.lastDeleteBackupKey = null;
+  saveState();
+  return { ok: true, restoredCount: results.filter(r => r.ok).length, results };
+}
+
+/**
+ * 按规则自动为冲突组选择删除目标
+ * 规则：
+ *   - 有锚定 -> 跳过整组
+ *   - 同时存在 ts4script 与 package：保留 ts4script，删 package（只删满足条件的）
+ *   - 类型相同：保留 mtime 更新的，删旧的
+ *   - 日期一样：保留较大的，删较小的
+ */
+ipcMain.handle('conflict-auto-plan', async (event, opts) => {
+  const groups = Array.isArray(opts && opts.groups) ? opts.groups : [];
+  const plan = []; // [{ conflictKey, toDelete: [path] }]
+  const skippedGroups = [];
+  for (const g of groups) {
+    const key = g && g.key;
+    const files = Array.isArray(g.files) ? g.files : [];
+    if (!key || files.length < 2) continue;
+    if (files.some(f => f.anchored || isFileAnchored(f.path))) {
+      skippedGroups.push({ key, reason: 'anchored' });
+      continue;
+    }
+    const hasTs4 = files.some(f => f.ext === '.ts4script' || (f.name || '').toLowerCase().endsWith('.ts4script'));
+    const hasPkg = files.some(f => f.ext === '.package' || (f.name || '').toLowerCase().endsWith('.package'));
+    const toDelete = [];
+    if (hasTs4 && hasPkg) {
+      // 只删 package（非 ts4script）
+      for (const f of files) {
+        const isTs4 = (f.ext === '.ts4script' || (f.name || '').toLowerCase().endsWith('.ts4script'));
+        if (!isTs4) toDelete.push(f.path);
+      }
+    } else {
+      // 同类：按 mtime desc, size desc 排序，保留第一个（最新/最大），删其余
+      const sorted = files.slice().sort((a, b) => {
+        const ma = a.mtime || '';
+        const mb = b.mtime || '';
+        if (ma !== mb) return ma < mb ? 1 : -1;
+        const sa = a.size || 0;
+        const sb = b.size || 0;
+        return sb - sa;
+      });
+      const keep = sorted[0];
+      for (const f of sorted) {
+        if (f.path !== keep.path) toDelete.push(f.path);
+      }
+    }
+    // 去掉重复与锚定
+    const uniq = [...new Set(toDelete.filter(p => !isFileAnchored(p)))];
+    if (uniq.length === 0) {
+      skippedGroups.push({ key, reason: 'no_delete_candidates' });
+      continue;
+    }
+    plan.push({ conflictKey: key, toDelete: uniq });
+  }
+  return { plan, skippedGroups };
+});
+
+// 执行批量删除（手动 or 自动，都走备份）
+ipcMain.handle('conflict-batch-delete', async (event, opts) => {
+  const mode = (opts && opts.mode === 'auto') ? 'auto' : 'manual';
+  const targetPaths = Array.isArray(opts && opts.paths) ? Array.from(new Set(opts.paths)) : [];
+  const operatorDetail = (opts && opts.detail) || '';
+  if (targetPaths.length === 0) return { ok: false, error: '未选择任何文件' };
+  try {
+    const result = deleteWithBackupSync({
+      targetPaths,
+      mode,
+      operatorDetail,
+    });
+    return result;
+  } catch (e) {
+    return { ok: false, error: (e && e.message) ? e.message : String(e) };
+  }
+});
+
+// 撤销最近一次删除
+ipcMain.handle('conflict-undo-last-delete', async () => {
+  try {
+    return undoLastDeleteSync();
+  } catch (e) {
+    return { ok: false, error: (e && e.message) ? e.message : String(e) };
+  }
+});
+
+// 查询冲突删除默认模式 & 设置
+ipcMain.handle('get-conflict-delete-mode', async () => {
+  return { mode: state.conflictDeleteMode || 'auto', canUndo: !!state.lastDeleteBackupKey, backupKey: state.lastDeleteBackupKey };
+});
+ipcMain.handle('set-conflict-delete-mode', async (event, mode) => {
+  const v = mode === 'manual' ? 'manual' : 'auto';
+  state.conflictDeleteMode = v;
+  saveState();
+  return { ok: true, mode: v };
+});
+
+// ============ IPC: 删除冲突文件（单删也走备份） ============
 ipcMain.handle('delete-conflict-file', async (event, filePath) => {
   if (!filePath) return { error: '路径为空' };
   if (isFileAnchored(filePath)) return { error: '已锚定的文件不可删除，请先解除锚定' };
   try {
-    const info = await fsp.stat(filePath).catch(() => null);
-    if (!info) return { error: '文件不存在或已被删除' };
-    if (!info.isFile()) return { error: '目标不是文件' };
-
-    // 检查是否在独立文件夹（除了该文件或其他关联文件外，是否没有其他 package/ts4script）
-    const parentDir = path.dirname(filePath);
-    const modRoot = state.scanResults && state.scanResults.root ? state.scanResults.root : null;
-    const isIndependentFolder = () => {
-      if (modRoot && parentDir === modRoot) return false; // 如果就是根目录下，不删文件夹
-      try {
-        const sibs = fs.readdirSync(parentDir);
-        if (sibs.length === 0) return true;
-        // 如果全是同一 mod 相关（同包前缀的辅助文件），判定可删文件夹
-        const basePrefix = path.basename(filePath, path.extname(filePath)).toLowerCase().replace(/[_-]?[v\d.]+$/, '');
-        let allRelated = true;
-        let hasOtherPackage = false;
-        for (const s of sibs) {
-          const ext = path.extname(s).toLowerCase();
-          if (ext === '.package' || ext === '.ts4script') {
-            const name = s.toLowerCase().replace(ext, '');
-            if (!name.startsWith(basePrefix.slice(0, Math.max(4, basePrefix.length * 0.5)))) {
-              hasOtherPackage = true;
-            }
-          }
-        }
-        return hasOtherPackage ? false : sibs.length <= 10;
-      } catch (e) {
-        return false;
-      }
-    };
-    const deleteFolder = isIndependentFolder();
-    let deleted = [filePath];
+    const res = deleteWithBackupSync({
+      targetPaths: [filePath],
+      mode: 'manual',
+      operatorDetail: 'single_delete',
+    });
+    if (!res.ok) return { error: res.error };
     let deletedFolder = null;
-    if (deleteFolder) {
-      // 递归删除整个文件夹
-      await fsp.rm(parentDir, { recursive: true, force: true });
-      deletedFolder = parentDir;
-    } else {
-      await fsp.unlink(filePath);
+    const deleted = [];
+    for (const r of res.results) {
+      if (r.ok) deleted.push(r.path);
     }
-    opLog('DELETE_CONFLICT_FILE', `删除冲突文件: ${filePath}${deletedFolder ? ` 及其所在文件夹: ${deletedFolder}` : ''}`);
-    // 清理分类/重复标记等本地缓存引用
-    delete state.classifications[filePath];
-    state.keepList = state.keepList.filter(p => p !== filePath);
-    if (state.scanResults) {
-      state.scanResults.files = state.scanResults.files.filter(f => f.path !== filePath);
+    // 如果只有一个 result 且它是文件夹，标记 deletedFolder
+    if (res.results.length === 1 && res.results[0].ok) {
+      const only = res.results[0];
+      try {
+        const st = fs.existsSync(only.path) ? null : (fs.existsSync(filePath) ? null : null);
+        const parentDir = path.dirname(filePath);
+        if (!fs.existsSync(parentDir)) deletedFolder = parentDir;
+      } catch {}
     }
-    saveState();
-    return { ok: true, deletedFolder, deleted };
+    return { ok: true, deletedFolder, deleted, backupKey: res.backupKey };
   } catch (e) {
     opLog('DELETE_CONFLICT_FILE_ERROR', `失败: ${filePath} - ${e.message}`);
     return { error: e.message };

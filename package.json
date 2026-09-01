@@ -1,13 +1,13 @@
 {
   "name": "sims4ycc-modtool",
-  "version": "1.0.1",
+  "version": "2.1.0",
   "description": "Sims 4 MOD 管理工具",
   "main": "main.js",
   "author": "Sims4YCC",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
+    "start": "electron --max-old-space-size=4096 .",
+    "dev": "electron --max-old-space-size=4096 . --dev",
     "build:icons": "node scripts/build-icons.js",
     "build:win": "electron-builder --win --x64",
     "build:mac": "electron-builder --mac",

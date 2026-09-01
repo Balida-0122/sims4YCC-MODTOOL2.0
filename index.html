@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sims4YCC MOD 管理工具</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部栏 -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="logo">Sims4YCC MOD 管理工具</span>
+      </div>
+      <div class="topbar-center">
+        <span id="modsPathDisplay" class="mods-path">未选择 Mods 文件夹</span>
+        <button id="btnSelectFolder" class="btn btn-sm">选择文件夹</button>
+      </div>
+      <div class="topbar-right">
+        <span id="statusText" class="status-text"></span>
+      </div>
+    </header>
+
+    <div class="main-layout">
+      <!-- 左侧任务栏 -->
+      <nav class="sidebar">
+        <div class="sidebar-header">任务流程</div>
+        <ul class="task-list" id="taskList">
+          <li class="task-item active" data-step="overview">
+            <span class="task-num">1</span>
+            <span class="task-name">总览</span>
+            <span class="task-actions">
+              <button class="task-btn skip-btn" title="跳过" data-step="overview">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="scan">
+            <span class="task-num">2</span>
+            <span class="task-name">深度扫描</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="scan">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="anchor">
+            <span class="task-num">3</span>
+            <span class="task-name">锚定保护</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="anchor">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="duplicate">
+            <span class="task-num">4</span>
+            <span class="task-name">重复排查</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="duplicate">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="conflict">
+            <span class="task-num">5</span>
+            <span class="task-name">冲突检测</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="conflict">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="translation">
+            <span class="task-num">6</span>
+            <span class="task-name">翻译识别</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="translation">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="classify">
+            <span class="task-num">7</span>
+            <span class="task-name">分类与打标签</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="classify">跳过</button>
+            </span>
+          </li>
+          <li class="task-item" data-step="move">
+            <span class="task-num">8</span>
+            <span class="task-name">创建并移动</span>
+            <span class="task-actions">
+              <button class="task-btn pause-btn" title="暂停">暂停</button>
+              <button class="task-btn skip-btn" title="跳过" data-step="move">跳过</button>
+            </span>
+          </li>
+        </ul>
+        <ul class="task-list">
+          <li class="task-item" data-step="settings">
+            <span class="task-num">⚙</span>
+            <span class="task-name">设置</span>
+          </li>
+        </ul>
+        <div class="sidebar-footer">
+          <button id="btnReset" class="btn btn-sm btn-danger">重置所有数据</button>
+        </div>
+      </nav>
+
+      <!-- 右侧内容区 -->
+      <main class="content" id="contentArea">
+        <!-- 总览 -->
+        <section class="page active" id="page-overview">
+          <h2 class="page-title">总览</h2>
+          <div class="overview-grid" id="overviewGrid">
+            <div class="overview-card">
+              <div class="card-icon">📁</div>
+              <div class="card-info">
+                <span class="card-label">Mods 文件夹</span>
+                <span class="card-value" id="ovModsFolder">未设置</span>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="card-icon">📦</div>
+              <div class="card-info">
+                <span class="card-label">总文件数</span>
+                <span class="card-value" id="ovTotalFiles">-</span>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="card-icon">🎯</div>
+              <div class="card-info">
+                <span class="card-label">.package 文件</span>
+                <span class="card-value" id="ovPackages">-</span>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="card-icon">⚙</div>
+              <div class="card-info">
+                <span class="card-label">.ts4script 文件</span>
+                <span class="card-value" id="ovTs4script">-</span>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="card-icon">🖼</div>
+              <div class="card-info">
+                <span class="card-label">图片文件</span>
+                <span class="card-value" id="ovImages">-</span>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="card-icon">📌</div>
+              <div class="card-info">
+                <span class="card-label">已锚定</span>
+                <span class="card-value" id="ovAnchored">-</span>
+              </div>
+            </div>
+          </div>
+          <div class="overview-steps">
+            <h3>操作流程</h3>
+            <ol class="flow-list">
+              <li>选择 Mods 文件夹</li>
+              <li>深度扫描 — 识别所有文件与 .ts4script 模组</li>
+              <li>锚定保护 — 保护大型功能模组不被移动</li>
+              <li>重复排查 — 标记保留 + 一键清理</li>
+              <li>冲突检测 — 检测资源覆盖冲突，管理白名单</li>
+              <li>翻译识别 — 识别 MOD 名称、作者、语言</li>
+              <li>分类与打标签 — 逻辑归类，不影响文件位置</li>
+              <li>创建并移动 — 物理创建文件夹并移动文件</li>
+            </ol>
+          </div>
+          <div class="overview-actions">
+            <button id="btnStartScan" class="btn btn-primary btn-lg">开始深度扫描</button>
+          </div>
+        </section>
+
+        <!-- 深度扫描 -->
+        <section class="page" id="page-scan">
+          <h2 class="page-title">深度扫描</h2>
+          <div class="page-toolbar">
+            <button id="btnRunScan" class="btn btn-primary">开始扫描</button>
+            <label class="switch-label">
+              <input type="checkbox" id="chkIntegrityCheck">
+              <span>启用完整性检测（校验 DBPF 签名/资源索引，检测损坏文件）</span>
+            </label>
+            <label class="switch-label" id="strictModeLabel" style="display:none">
+              <input type="checkbox" id="chkStrictMode">
+              <span>严格模式（恢复原始严格检测，默认关闭使用综合实用型检测）</span>
+            </label>
+            <button id="btnExportDamageReport" class="btn btn-sm hidden">导出损坏报告</button>
+          </div>
+          <div id="scanProgress"></div>
+          <div id="scanProgressBar" class="progress-bar-wrap hidden">
+            <div class="progress-bar"><div class="progress-bar-fill" id="scanProgressFill"></div></div>
+            <div id="scanProgressText" class="progress-bar-text">准备中...</div>
+          </div>
+          <div id="scanResultArea" class="result-area"></div>
+        </section>
+
+        <!-- 锚定保护 -->
+        <section class="page" id="page-anchor">
+          <h2 class="page-title">锚定保护</h2>
+          <div class="page-toolbar">
+            <input type="text" id="anchorSearch" class="search-input" placeholder="搜索已锚定项目...">
+            <button id="btnSelectAllSearch" class="btn btn-sm">全选当前结果</button>
+            <button id="btnBatchAddAnchor" class="btn btn-sm btn-primary">批量添加锚定</button>
+          </div>
+          <div class="anchor-layout">
+            <div class="anchor-panel">
+              <h3>Mods 根目录文件夹（勾选即锚定整个文件夹）</h3>
+              <div id="rootFoldersList" class="folder-list"></div>
+            </div>
+            <div class="anchor-panel">
+              <h3>已锚定项目</h3>
+              <div id="anchoredList" class="folder-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 重复排查 -->
+        <section class="page" id="page-duplicate">
+          <h2 class="page-title">重复排查</h2>
+          <div class="page-toolbar">
+            <button id="btnScanDup" class="btn btn-primary">扫描重复文件</button>
+            <button id="btnCleanDup" class="btn btn-danger">一键清理（保留最新）</button>
+            <span id="dupSummary" class="summary-text"></span>
+          </div>
+          <div class="dup-info-banner">
+            <strong>操作顺序：</strong>① 先扫描重复 → ② 手动标记需保留的文件（功能B）→ ③ 一键清理自动删除旧版本（功能A，已标记保留的不会被删除）
+          </div>
+          <div id="dupResultArea" class="result-area"></div>
+        </section>
+
+        <!-- 冲突检测 -->
+        <section class="page" id="page-conflict">
+          <h2 class="page-title">冲突检测</h2>
+          <!-- 检测进度条 -->
+          <div id="conflictProgressBar" class="progress-bar-wrap hidden">
+            <div class="progress-bar"><div class="progress-bar-fill" id="conflictProgressFill"></div></div>
+            <div id="conflictProgressText" class="progress-bar-text">准备中...</div>
+          </div>
+          <!-- 工具栏：扫描 + 模式切换 + 删除操作 -->
+          <div class="page-toolbar">
+            <button id="btnScanConflict" class="btn btn-primary">扫描冲突</button>
+            <button id="btnShowWhitelist" class="btn btn-sm">白名单管理</button>
+            <!-- 模式切换 -->
+            <div class="conflict-mode-switch" id="conflictModeSwitch">
+              <button type="button" class="mode-btn active" data-mode="auto" title="按规则自动选择要删除的文件">🤖 自动智能删除</button>
+              <button type="button" class="mode-btn" data-mode="manual" title="手动勾选要删除的文件">✅ 手动勾选删除</button>
+            </div>
+            <!-- 删除按钮 -->
+            <button id="btnConflictAutoDelete" class="btn btn-danger">自动删除</button>
+            <button id="btnConflictManualDelete" class="btn btn-danger hidden">删除选中文件</button>
+            <button id="btnConflictUndo" class="btn btn-sm" title="撤销最近一次删除操作">↶ 撤销上次删除</button>
+            <span id="conflictSummary" class="summary-text"></span>
+          </div>
+          <div class="conflict-info-banner">
+            <strong>说明：</strong>含 .ts4script 的文件夹内文件拥有最高保留优先级，不会被其他同名或冲突文件覆盖或删除。<br>
+            <strong>删除安全：</strong>所有删除操作都会先备份到 <code>Mods/_deleted_backup/[时间戳]/</code>，可随时点击"撤销上次删除"恢复。
+          </div>
+          <!-- 勾选计数（手动模式） -->
+          <div id="conflictSelectCount" class="conflict-select-count hidden">已勾选 <strong id="conflictSelectedNum">0</strong> 个文件待删除</div>
+          <div id="conflictResultArea" class="result-area"></div>
+          <!-- 白名单管理弹窗 -->
+          <div id="whitelistModal" class="modal hidden">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>白名单管理</h3>
+                <button class="modal-close" data-close="whitelistModal">×</button>
+              </div>
+              <div class="modal-body" id="whitelistBody"></div>
+            </div>
+          </div>
+          <!-- 自动删除确认弹窗 -->
+          <div id="autoDeleteModal" class="modal hidden">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>确认自动删除</h3>
+                <button class="modal-close" data-close="autoDeleteModal">×</button>
+              </div>
+              <div class="modal-body">
+                <div class="auto-delete-summary" id="autoDeleteSummary"></div>
+                <h4 style="margin:12px 0 6px">即将删除以下文件（已自动跳过含锚定的冲突组）：</h4>
+                <div id="autoDeleteList" class="auto-delete-list"></div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn" data-close="autoDeleteModal">取消</button>
+                <button id="btnConfirmAutoDelete" class="btn btn-danger">确认删除</button>
+              </div>
+            </div>
+          </div>
+          <!-- 手动删除确认弹窗 -->
+          <div id="manualDeleteModal" class="modal hidden">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>确认删除选中文件</h3>
+                <button class="modal-close" data-close="manualDeleteModal">×</button>
+              </div>
+              <div class="modal-body">
+                <div class="manual-delete-summary" id="manualDeleteSummary"></div>
+                <h4 style="margin:12px 0 6px">选中文件列表：</h4>
+                <div id="manualDeleteList" class="auto-delete-list"></div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn" data-close="manualDeleteModal">取消</button>
+                <button id="btnConfirmManualDelete" class="btn btn-danger">确认删除</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 翻译识别 -->
+        <section class="page" id="page-translation">
+          <h2 class="page-title">翻译识别</h2>
+          <div class="trans-info-banner">
+            <strong>📋 手动选择翻译：</strong>勾选需要翻译的文件后点击下方按钮；未勾选的文件保持原样。已翻译的文件会显示“已翻译”状态，默认会被跳过（可勾选“强制重新翻译”覆盖）。
+          </div>
+          <div class="page-toolbar">
+            <button id="btnSelectAllTrans" class="btn btn-sm" title="全选当前列表">全选</button>
+            <button id="btnSelectNoneTrans" class="btn btn-sm" title="取消全选">取消全选</button>
+            <button id="btnSelectUntranslated" class="btn btn-sm" title="仅选中未翻译的文件">选中未翻译</button>
+            <button id="btnScanTrans" class="btn btn-primary">翻译选中文件</button>
+            <label class="trans-force-toggle" title="勾选后将重新翻译已翻译的文件">
+              <input type="checkbox" id="chkForceRetranslate">
+              <span>强制重新翻译</span>
+            </label>
+            <span id="transSelectedCount" class="count-text">已选 0 项</span>
+            <span id="transSummary" class="summary-text"></span>
+          </div>
+          <div id="transProgressBar" class="progress-bar-wrap hidden">
+            <div class="progress-bar"><div class="progress-bar-fill" id="transProgressFill"></div></div>
+            <div id="transProgressText" class="progress-bar-text">准备中...</div>
+          </div>
+          <div id="transResultArea" class="result-area"></div>
+        </section>
+
+        <!-- 分类与打标签 -->
+        <section class="page" id="page-classify">
+          <h2 class="page-title">分类与打标签</h2>
+          <div class="classify-info-banner">
+            <strong>自动分类优先，手动微调为辅：</strong>深度扫描完成后系统已按关键词自动为 MOD 归类（标有"自动"标记），你可直接执行"创建并移动"。若需调整，可重新选择分类或标签后应用（会标记为"手动"并保持不被覆盖）。<br>
+            分类仅逻辑记录目标存储路径（不移动文件），标签仅用于筛选检索。已锚定模组可查看但不可分类（标注"已锚定"）。标签筛选结果优先于名称排序。
+          </div>
+          <div class="classify-layout">
+            <!-- 左侧：文件列表 -->
+            <div class="classify-files">
+              <div class="classify-toolbar">
+                <input type="text" id="classifySearch" class="search-input" placeholder="搜索文件名...">
+                <select id="tagFilter" class="select-input"><option value="">按标签筛选</option></select>
+                <span id="classifySelectedCount" class="count-text">已选 0 项</span>
+              </div>
+              <div id="classifyFileList" class="file-list"></div>
+            </div>
+            <!-- 右侧：分类标签面板 -->
+            <div class="classify-panel">
+              <h3>批量操作</h3>
+              <div class="panel-section">
+                <label class="panel-label">选择分类</label>
+                <div id="categoryTree" class="category-tree"></div>
+                <div class="selected-category" id="selectedCategoryDisplay">未选择分类</div>
+              </div>
+              <div class="panel-section">
+                <label class="panel-label">添加标签</label>
+                <div class="tag-input-row">
+                  <input type="text" id="tagInput" class="text-input" placeholder="输入标签名...">
+                  <button id="btnAddTag" class="btn btn-sm btn-primary">添加</button>
+                </div>
+                <div id="tagSuggestions" class="tag-suggestions"></div>
+                <div id="selectedTags" class="selected-tags"></div>
+              </div>
+              <button id="btnApplyClassify" class="btn btn-primary btn-block">应用到选中文件</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 创建并移动 -->
+        <section class="page" id="page-move">
+          <h2 class="page-title">创建并移动</h2>
+          <div class="move-info-banner warning">
+            <strong>⚠ 最终步骤：</strong>此操作将根据分类结果物理创建多级文件夹，并将文件剪切至目标子文件夹。<br>
+            已锚定模组不会被移动。请确认所有分类完成后执行。
+          </div>
+          <div class="page-toolbar">
+            <input type="text" id="moveSearch" class="search-input" placeholder="搜索文件名或分类..." style="flex:1;min-width:180px">
+            <button id="btnPreviewMove" class="btn btn-primary">预览移动计划</button>
+            <button id="btnExecuteMove" class="btn btn-danger">执行移动</button>
+          </div>
+          <div id="moveResultArea" class="result-area"></div>
+        </section>
+
+        <!-- 设置 -->
+        <section class="page" id="page-settings">
+          <h2 class="page-title">设置</h2>
+
+          <div class="settings-section">
+            <h3 class="settings-title">翻译服务</h3>
+            <div class="settings-row">
+              <label class="settings-label">启用翻译引擎</label>
+              <label class="switch-label">
+                <input type="checkbox" id="chkTranslateEnabled" checked>
+                <span>启用后翻译识别页面将自动翻译文件名为中文</span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">服务商</label>
+              <select id="selTranslateService" class="select-input">
+                <option value="libretranslate">LibreTranslate（免费公共实例）</option>
+                <option value="deepseek">DeepSeek（OpenAI 兼容）</option>
+                <option value="custom">自定义 API 地址</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">API 地址</label>
+              <input type="text" id="txtTranslateApiUrl" class="search-input" placeholder="https://libretranslate.com/translate 或 https://api.deepseek.com" style="flex:1">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">API Key</label>
+              <input type="text" id="txtTranslateApiKey" class="search-input" placeholder="DeepSeek/OpenAI 需要，LibreTranslate 可留空" style="flex:1">
+            </div>
+            <div class="settings-row" id="modelRow" style="display:none">
+              <label class="settings-label">模型名称</label>
+              <input type="text" id="txtTranslateModel" class="search-input" placeholder="deepseek-chat" style="flex:1">
+            </div>
+            <div class="settings-row">
+              <label class="settings-label">目标语言</label>
+              <select id="selTranslateTargetLang" class="select-input">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+                <option value="ko">한국어</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <button id="btnSaveTranslateConfig" class="btn btn-primary">保存翻译配置</button>
+              <button id="btnTestTranslate" class="btn btn-sm">测试翻译</button>
+              <span id="translateTestResult" class="summary-text"></span>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-title">完整性检测</h3>
+            <div class="settings-row">
+              <label class="settings-label">严格模式</label>
+              <label class="switch-label">
+                <input type="checkbox" id="chkStrictModeSettings">
+                <span>开启后恢复原始严格检测逻辑（默认关闭，使用综合实用型检测减少误报）</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-title">冲突删除</h3>
+            <div class="settings-row">
+              <label class="settings-label">冲突删除默认模式</label>
+              <select id="selConflictDeleteMode" class="select-input">
+                <option value="auto">自动智能删除（按规则自动选择，用户二次确认）</option>
+                <option value="manual">手动勾选删除（手动勾选要删除的文件）</option>
+              </select>
+            </div>
+            <div class="settings-row" style="align-items:flex-start;">
+              <label class="settings-label">说明</label>
+              <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
+                <strong>自动智能删除规则：</strong><br>
+                1. 锚定保护优先：冲突组含锚定文件则整组跳过<br>
+                2. 保留脚本模组：同时有 .ts4script 和 .package 时，保留 .ts4script<br>
+                3. 保留最新文件：类型相同则保留修改日期较新的<br>
+                4. 保留较大文件：日期相同则保留文件更大的<br><br>
+                <strong>删除安全机制（两种模式共用）：</strong><br>
+                · 删除前自动备份到 <code>Mods/_deleted_backup/[时间戳]/</code><br>
+                · 支持"撤销上次删除"一键恢复<br>
+                · 所有操作记录到 operations.log
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- 图片预览弹窗 -->
+    <div id="imageModal" class="modal hidden">
+      <div class="modal-content modal-large">
+        <div class="modal-header">
+          <h3 id="imageModalTitle">图片预览</h3>
+          <button class="modal-close" data-close="imageModal">×</button>
+        </div>
+        <div class="modal-body image-viewer-body">
+          <div class="image-nav">
+            <button id="imgPrev" class="img-nav-btn">‹</button>
+            <div id="imageContainer" class="image-container">
+              <img id="modalImage" class="modal-image" src="" alt="预览图">
+            </div>
+            <button id="imgNext" class="img-nav-btn">›</button>
+          </div>
+          <div class="image-controls">
+            <button id="imgZoomIn" class="btn btn-sm">放大</button>
+            <button id="imgZoomOut" class="btn btn-sm">缩小</button>
+            <button id="imgZoomReset" class="btn btn-sm">重置</button>
+            <span id="imgIndex" class="img-index"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用提示 -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

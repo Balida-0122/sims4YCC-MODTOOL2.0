@@ -32,7 +32,20 @@ contextBridge.exposeInMainWorld('api', {
   addWhitelist: (keys) => ipcRenderer.invoke('add-whitelist', keys),
   removeWhitelist: (key) => ipcRenderer.invoke('remove-whitelist', key),
   getWhitelist: () => ipcRenderer.invoke('get-whitelist'),
-  // 冲突文件删除
+  // 冲突检测进度事件（由 worker 发出）
+  onConflictProgress: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (e, data) => handler(data);
+    ipcRenderer.on('conflict-progress', listener);
+    return () => ipcRenderer.removeListener('conflict-progress', listener);
+  },
+  // 冲突删除：自动规划、批量删除、撤销、默认模式
+  conflictAutoPlan: (groups) => ipcRenderer.invoke('conflict-auto-plan', { groups }),
+  conflictBatchDelete: (opts) => ipcRenderer.invoke('conflict-batch-delete', opts),
+  conflictUndoLastDelete: () => ipcRenderer.invoke('conflict-undo-last-delete'),
+  getConflictDeleteMode: () => ipcRenderer.invoke('get-conflict-delete-mode'),
+  setConflictDeleteMode: (mode) => ipcRenderer.invoke('set-conflict-delete-mode', mode),
+  // 冲突文件删除（单个）
   deleteConflictFile: (filePath) => ipcRenderer.invoke('delete-conflict-file', filePath),
 
   // 翻译识别（支持仅翻译选中文件、跳过已翻译、强制重新翻译）
