@@ -1,0 +1,63 @@
+name: Build macOS DMG
+
+on:
+  # 手动触发
+  workflow_dispatch:
+  # 推送到 main/master 分支时自动触发
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "main.js"
+      - "preload.js"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/build-mac.yml"
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Generate icons
+        run: |
+          node scripts/build-icons.js
+          # 如果 @fiahfy/icns 在 mac runner 上生成失败，用系统 iconutil 兜底
+          if [ ! -f build/icon.icns ] || [ ! -s build/icon.icns ]; then
+            if [ -d build/icon.iconset ]; then
+              iconutil -c icns build/icon.iconset -o build/icon.icns
+              echo "iconutil fallback done: $(ls -la build/icon.icns)"
+            fi
+          fi
+
+      - name: Build macOS DMG
+        run: npm run build:mac
+        env:
+          # 未签名 + 未 notarize 构建，避免 codesign 自动探测失败
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          APPLE_ID: ""
+          APPLE_APP_SPECIFIC_PASSWORD: ""
+          APPLE_TEAM_ID: ""
+
+      - name: Upload DMG artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 30

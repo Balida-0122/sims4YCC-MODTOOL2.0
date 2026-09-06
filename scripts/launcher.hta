@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="x-ua-compatible" content="IE=edge">
+    <title>Launcher</title>
+    <hta:application
+        id="LauncherApp"
+        applicationname="Launcher"
+        border="none"
+        caption="no"
+        showintaskbar="no"
+        windowstate="minimize"
+        sysmenu="no"
+    >
+</head>
+<body>
+    <script type="text/vbscript">
+        Option Explicit
+        Dim objShell, objFSO, projectRoot, nodeExe, scriptPath, args, exitCode, logFile
+
+        Set objShell = CreateObject("WScript.Shell")
+        Set objFSO = CreateObject("Scripting.FileSystemObject")
+
+        projectRoot = objFSO.GetParentFolderName(objFSO.GetParentFolderName(location.pathname))
+        If Left(projectRoot, 1) = "/" Then projectRoot = Mid(projectRoot, 2)
+        projectRoot = Replace(projectRoot, "/", "\")
+
+        nodeExe = "C:\Program Files\nodejs\node.exe"
+        scriptPath = projectRoot & "\scripts\do-all-tasks.js"
+        logFile = projectRoot & "\build\hta-launcher.log"
+
+        On Error Resume Next
+        If Not objFSO.FolderExists(projectRoot & "\build") Then
+            objFSO.CreateFolder projectRoot & "\build"
+        End If
+        On Error GoTo 0
+
+        Dim logStream
+        Set logStream = objFSO.CreateTextFile(logFile, True)
+        logStream.WriteLine "HTA Launcher start: " & Now
+        logStream.WriteLine "Project root: " & projectRoot
+        logStream.WriteLine "Node exe: " & nodeExe
+        logStream.WriteLine "Script: " & scriptPath
+        logStream.WriteLine "Exists(node): " & objFSO.FileExists(nodeExe)
+        logStream.WriteLine "Exists(script): " & objFSO.FileExists(scriptPath)
+
+        ' Step 1: npm install if no node_modules
+        Dim nmPath
+        nmPath = projectRoot & "\node_modules"
+        If Not objFSO.FolderExists(nmPath) Then
+            logStream.WriteLine "node_modules missing, running npm install..."
+            Dim npmCmd
+            npmCmd = "cd /d """ & projectRoot & """ && npm install --no-audit --no-fund --loglevel=warn"
+            logStream.WriteLine "  CMD: " & npmCmd
+            On Error Resume Next
+            exitCode = objShell.Run("%comspec% /c " & npmCmd, 0, True)
+            If Err.Number <> 0 Then
+                logStream.WriteLine "  npm install error: " & Err.Description
+            End If
+            On Error GoTo 0
+            logStream.WriteLine "  npm install exit code: " & exitCode
+        Else
+            logStream.WriteLine "node_modules already exists"
+        End If
+
+        ' Step 2: Run do-all-tasks.js
+        args = """" & nodeExe & """ """ & scriptPath & """"
+        logStream.WriteLine "Executing: " & args
+        logStream.WriteLine ""
+        logStream.Close
+
+        On Error Resume Next
+        exitCode = objShell.Run(args, 0, True)
+        If Err.Number <> 0 Then
+            Set logStream = objFSO.OpenTextFile(logFile, 8)
+            logStream.WriteLine "Run error: " & Err.Description
+            logStream.Close
+        End If
+        On Error GoTo 0
+
+        Set logStream = objFSO.OpenTextFile(logFile, 8)
+        logStream.WriteLine ""
+        logStream.WriteLine "HTA Launcher done. Node exit code: " & exitCode
+        logStream.WriteLine "HTA Launcher end: " & Now
+        logStream.Close
+
+        ' Write a marker so caller knows we're done
+        Dim markerPath
+        markerPath = projectRoot & "\build\hta-done.marker"
+        Set logStream = objFSO.CreateTextFile(markerPath, True)
+        logStream.WriteLine exitCode
+        logStream.Close
+
+        window.close
+    </script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  // 文件夹选择与状态
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  getState: () => ipcRenderer.invoke('get-state'),
+  resetState: () => ipcRenderer.invoke('reset-state'),
+
+  // 深度扫描（支持完整性检测选项，以及进度事件）
+  deepScan: (opts) => ipcRenderer.invoke('deep-scan', opts),
+  onScanProgress: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (e, data) => handler(data);
+    ipcRenderer.on('scan-progress', listener);
+    return () => ipcRenderer.removeListener('scan-progress', listener);
+  },
+
+  // 锚定保护
+  getAnchors: () => ipcRenderer.invoke('get-anchors'),
+  addAnchor: (paths) => ipcRenderer.invoke('add-anchor', paths),
+  removeAnchor: (p) => ipcRenderer.invoke('remove-anchor', p),
+  getRootFolders: () => ipcRenderer.invoke('get-root-folders'),
+
+  // 重复排查
+  scanDuplicates: () => ipcRenderer.invoke('scan-duplicates'),
+  markKeep: (paths) => ipcRenderer.invoke('mark-keep', paths),
+  unmarkKeep: (paths) => ipcRenderer.invoke('unmark-keep', paths),
+  cleanDuplicates: () => ipcRenderer.invoke('clean-duplicates'),
+
+  // 冲突检测
+  scanConflicts: () => ipcRenderer.invoke('scan-conflicts'),
+  addWhitelist: (keys) => ipcRenderer.invoke('add-whitelist', keys),
+  removeWhitelist: (key) => ipcRenderer.invoke('remove-whitelist', key),
+  getWhitelist: () => ipcRenderer.invoke('get-whitelist'),
+  // 冲突检测进度事件（由 worker 发出）
+  onConflictProgress: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (e, data) => handler(data);
+    ipcRenderer.on('conflict-progress', listener);
+    return () => ipcRenderer.removeListener('conflict-progress', listener);
+  },
+  // 冲突删除：自动规划、批量删除、撤销、默认模式
+  conflictAutoPlan: (groups) => ipcRenderer.invoke('conflict-auto-plan', { groups }),
+  conflictBatchDelete: (opts) => ipcRenderer.invoke('conflict-batch-delete', opts),
+  conflictUndoLastDelete: () => ipcRenderer.invoke('conflict-undo-last-delete'),
+  getConflictDeleteMode: () => ipcRenderer.invoke('get-conflict-delete-mode'),
+  setConflictDeleteMode: (mode) => ipcRenderer.invoke('set-conflict-delete-mode', mode),
+  // 冲突文件删除（单个）
+  deleteConflictFile: (filePath) => ipcRenderer.invoke('delete-conflict-file', filePath),
+
+  // 翻译识别（支持仅翻译选中文件、跳过已翻译、强制重新翻译）
+  scanTranslation: (opts) => ipcRenderer.invoke('scan-translation', opts),
+  // 手动修改中文名称（全局联动，写入本地索引）
+  setChineseName: (modPath, chineseName) => ipcRenderer.invoke('set-chinese-name', modPath, chineseName),
+
+  // 分类与打标签
+  setClassification: (modPath, classification) => ipcRenderer.invoke('set-classification', modPath, classification),
+  getClassifications: () => ipcRenderer.invoke('get-classifications'),
+  getCategories: () => ipcRenderer.invoke('get-categories'),
+  addCategory: (parentPath, name) => ipcRenderer.invoke('add-category', parentPath, name),
+  addTag: (tag) => ipcRenderer.invoke('add-tag', tag),
+  getTags: () => ipcRenderer.invoke('get-tags'),
+  removeTag: (tag) => ipcRenderer.invoke('remove-tag', tag),
+
+  // 创建并移动
+  executeMove: () => ipcRenderer.invoke('execute-move'),
+
+  // 图片预览
+  getImages: (folderPath) => ipcRenderer.invoke('get-images', folderPath),
+
+  // 一键定位
+  locateFile: (filePath) => ipcRenderer.invoke('locate-file', filePath),
+
+  // 损坏检测报告导出
+  exportDamagedReport: () => ipcRenderer.invoke('export-damaged-report'),
+
+  // 严格模式开关
+  setStrictMode: (enabled) => ipcRenderer.invoke('set-strict-mode', enabled),
+
+  // 翻译配置
+  getTranslationConfig: () => ipcRenderer.invoke('get-translation-config'),
+  setTranslationConfig: (config) => ipcRenderer.invoke('set-translation-config', config),
+  testTranslation: (text) => ipcRenderer.invoke('test-translation', text),
+
+  // 翻译进度监听
+  onTranslationProgress: (handler) => {
+    const listener = (e, data) => handler(data);
+    ipcRenderer.on('translation-progress', listener);
+    return () => ipcRenderer.removeListener('translation-progress', listener);
+  },
+
+  // ============ 新增功能 ============
+  // 功能一：MOD 详情（预览图 + 资源类型）
+  getModDetail: (filePath) => ipcRenderer.invoke('get-mod-detail', filePath),
+
+  // 功能二：一键启用/停用（.disabled 重命名）
+  toggleMod: (filePath, enable) => ipcRenderer.invoke('toggle-mod', filePath, enable),
+  toggleModBatch: (paths, enable) => ipcRenderer.invoke('toggle-mod-batch', paths, enable),
+
+  // 功能四：拖拽导入
+  importDroppedFiles: (filePaths) => ipcRenderer.invoke('import-dropped-files', filePaths),
+
+  // 功能五：自动定位 Mods 文件夹
+  autoLocateModsFolder: () => ipcRenderer.invoke('auto-locate-mods-folder'),
+
+  // 功能六：一键创建 Mods 文件夹
+  createModsFolder: () => ipcRenderer.invoke('create-mods-folder'),
+});
