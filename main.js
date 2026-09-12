@@ -29,12 +29,77 @@ function isFileAnchored(filePath) {
   });
 }
 
+/**
+ * 跨平台路径比较键：Windows/macOS 统一（win32 忽略大小写）
+ */
+function pathKey(p) {
+  let k = normalizePath(p || '');
+  if (process.platform === 'win32') k = k.toLowerCase();
+  return k;
+}
+
+/**
+ * 判断某文件（忽略 .disabled 后缀差异）是否实际存在：
+ * 本体、+'.disabled'、去'.disabled' 三种形态任一存在即视为存在
+ */
+function fileExistsTolerant(p) {
+  if (!p) return false;
+  const candidates = [p];
+  const s = String(p);
+  if (/\.disabled$/i.test(s)) candidates.push(s.replace(/\.disabled$/i, ''));
+  else candidates.push(s + '.disabled');
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return true; } catch (e) {}
+  }
+  return false;
+}
+
 // ============ 操作日志 ============
 function opLog(action, detail) {
   try {
     const line = `[${new Date().toISOString()}] [${action}] ${detail || ''}\n`;
     fs.appendFileSync(OPER_LOG, line, 'utf-8');
   } catch (e) {}
+}
+
+/**
+ * 深度扫描时同步清理日志：删除引用“已不存在文件”的日志行。
+ * 仅处理位于 modsRoot 之下的路径引用，尽力提取行内路径片段。
+ * 返回被移除的行数。
+ */
+function purgeStaleLogEntries(modsRoot) {
+  try {
+    if (!fs.existsSync(OPER_LOG)) return 0;
+    const rootKey = pathKey(modsRoot);
+    const lines = fs.readFileSync(OPER_LOG, 'utf-8').split(/\r?\n/);
+    let removed = 0;
+    const kept = lines.filter(line => {
+      if (!line || !line.trim()) return true;
+      // 行内若出现 mods 根路径，提取其后至行尾的路径片段候选
+      if (!line.toLowerCase().includes(rootKey)) return true;
+      // 用一个宽松的正则找出所有以根路径开头的候选（允许空格，到引号/括号/箭头为止）
+      const escRoot = rootKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(escRoot + '[^"\'<>\\[\\]]{0,600}', 'g');
+      const candidates = line.match(re) || [];
+      if (candidates.length === 0) return true;
+      for (const cand of candidates) {
+        // 拆分同段内的多个路径（enable 日志为 from -> to 两个路径）
+        for (const seg of cand.split(/\s+->\s+|\s+->|->\s+|->/)) {
+          const p = seg.replace(/[\s,;]+$/, '').trim();
+          if (!p) continue;
+          if (pathKey(p) === rootKey) continue; // 仅根目录本身，无法判断
+          if (!fileExistsTolerant(p)) { removed++; return false; }
+        }
+      }
+      return true;
+    });
+    if (removed > 0) {
+      fs.writeFileSync(OPER_LOG, kept.join('\n').replace(/\n+$/, '\n'), 'utf-8');
+    }
+    return removed;
+  } catch (e) {
+    return 0;
+  }
 }
 
 // ============ 状态持久化 ============
@@ -96,6 +161,15 @@ function loadState() {
       state = { ...state, ...saved };
       if (!state.categories || state.categories.length === 0) {
         state.categories = defaultCategories();
+      }
+      // 标签数据结构迁移：旧版为字符串数组 → 对象数组 { name, source, category }
+      if (Array.isArray(state.tags)) {
+        state.tags = state.tags.map(t => {
+          if (typeof t === 'string') return { name: t, source: 'manual', category: null };
+          return { name: String(t.name || ''), source: t.source || 'manual', category: Array.isArray(t.category) ? t.category : null };
+        }).filter(t => t.name);
+      } else {
+        state.tags = [];
       }
     }
   } catch (e) {
@@ -573,12 +647,19 @@ ipcMain.handle('deep-scan', async (event, opts) => {
   await walkDir(root, async (file) => {
     const stat = await fsp.stat(file).catch(() => null);
     if (!stat) return;
-    const ext = path.extname(file).toLowerCase();
+    const rawName = path.basename(file);
+    const disabled = rawName.toLowerCase().endsWith('.disabled');
+    // 忽略 .disabled 后缀后的真实扩展名（用于识别 .package.disabled / .ts4script.disabled）
+    const realBase = disabled ? rawName.slice(0, -'.disabled'.length) : rawName;
+    const realExt = path.extname(realBase).toLowerCase();
+    const isModFile = realExt === '.package' || realExt === '.ts4script';
     const entry = {
       path: file,
       relPath: path.relative(root, file),
-      name: path.basename(file),
-      ext,
+      name: rawName,
+      ext: path.extname(rawName).toLowerCase(),
+      disabled,
+      modExt: isModFile ? realExt : '',   // 有效 MOD 类型（已停用文件也能识别）
       size: stat.size,
       mtime: stat.mtime.toISOString(),
       author: extractAuthor(file),
@@ -586,7 +667,7 @@ ipcMain.handle('deep-scan', async (event, opts) => {
     allFiles.push(entry);
     scanProgress.current = allFiles.length;
 
-    if (isTs4Script(file)) {
+    if (realExt === '.ts4script') {
       // 找到 .ts4script 所属的根级文件夹
       const rel = path.relative(root, file);
       const topFolder = rel.split(path.sep)[0];
@@ -612,8 +693,12 @@ ipcMain.handle('deep-scan', async (event, opts) => {
 
   // 自动分类（为每个 .package 文件写入 classifications，不覆盖用户已手动设置的分类）
   for (const f of allFiles) {
-    if (f.ext !== '.package' && f.ext !== '.ts4script') continue;
-    if (state.classifications[f.path] && state.classifications[f.path].__manual) continue; // 用户手动设置的不覆盖
+    if (f.modExt !== '.package' && f.modExt !== '.ts4script') continue;
+    if (state.classifications[f.path] &&
+        (state.classifications[f.path].__manual ||
+         (state.classifications[f.path].__categorySource && state.classifications[f.path].__categorySource !== 'auto'))) {
+      continue; // 用户手动设置/标签修正的不覆盖
+    }
     if (isFileAnchored(f.path)) continue; // 锚定的不自动分类
     const category = autoClassifyFile(f);
     const existing = state.classifications[f.path] || {};
@@ -621,7 +706,45 @@ ipcMain.handle('deep-scan', async (event, opts) => {
       category,
       tags: existing.tags || [],
       __auto: true,
+      __categorySource: 'auto',
     };
+  }
+
+  // ============ 同步清理已删除文件的记录（文件列表、分类、锚定、保留列表、日志） ============
+  const pruneScan = { classifications: 0, anchored: 0, keepList: 0, logLines: 0 };
+  {
+    // 文件列表：本次扫描即真实文件全集（含 .disabled），因此直接作为存在性依据
+    const existSet = new Set(allFiles.map(f => pathKey(f.path)));
+    const existsTolerant = (p) => {
+      const k = pathKey(p);
+      if (existSet.has(k)) return true;
+      const base = /\.disabled$/i.test(String(p)) ? String(p).replace(/\.disabled$/i, '') : String(p);
+      return existSet.has(pathKey(base)) || existSet.has(pathKey(base + '.disabled'));
+    };
+    // 1) 分类记录（仅保留 Mods 目录内且文件仍存在的）
+    const rootKey = pathKey(root);
+    for (const key of Object.keys(state.classifications)) {
+      if (!pathKey(key).startsWith(rootKey)) continue; // 非本 Mods 目录的记录保留
+      if (!existsTolerant(key)) {
+        delete state.classifications[key];
+        pruneScan.classifications++;
+      }
+    }
+    // 2) 锚定记录：文件夹已不存在的移除
+    state.anchored = state.anchored.filter(a => {
+      let ok = false;
+      try { ok = fs.existsSync(a); } catch (e) {}
+      if (!ok) pruneScan.anchored++;
+      return ok;
+    });
+    // 3) 重复保留列表：文件已不存在的移除
+    state.keepList = (state.keepList || []).filter(p => {
+      const ok = fileExistsTolerant(p);
+      if (!ok) pruneScan.keepList++;
+      return ok;
+    });
+    // 4) 操作日志：删除引用已不存在文件的日志行
+    pruneScan.logLines = purgeStaleLogEntries(root);
   }
 
   // 完整性检测（可选）
@@ -690,18 +813,21 @@ ipcMain.handle('deep-scan', async (event, opts) => {
     strictMode: !!state.strictMode,
     damagedFiles: state.damagedFiles,
     autoClassifiedCount: Object.keys(state.classifications).filter(k => state.classifications[k].__auto).length,
+    pruned: pruneScan,   // 本次扫描清理的已删除记录数
     stats: {
       totalFiles: allFiles.length,
       packageFiles: allFiles.filter(f => f.ext === '.package').length,
       ts4scriptFiles: allFiles.filter(f => f.ext === '.ts4script').length,
       imageFiles: allFiles.filter(f => isImageFile(f.name)).length,
       totalFolders: rootFirstLevelFolders.length,
+      disabledCount: allFiles.filter(f => f.disabled && (f.modExt === '.package' || f.modExt === '.ts4script')).length,
       damagedCount: state.damagedFiles.filter(d => d.level === 'critical').length,
       warningCount: state.damagedFiles.filter(d => d.level === 'warning').length,
       nonstandardCount: allFiles.filter(f => f.nonstandard).length,
     },
   };
-  opLog('DEEP_SCAN', `扫描根目录 ${root}，共 ${allFiles.length} 个文件，严重损坏 ${state.scanResults.stats.damagedCount} 个，警告 ${state.scanResults.stats.warningCount} 个，非标准 ${state.scanResults.stats.nonstandardCount} 个，自动分类 ${state.scanResults.autoClassifiedCount} 个`);
+  const prunedTotal = pruneScan.classifications + pruneScan.anchored + pruneScan.keepList;
+  opLog('DEEP_SCAN', `扫描根目录 ${root}，共 ${allFiles.length} 个文件（已停用 ${state.scanResults.stats.disabledCount} 个），严重损坏 ${state.scanResults.stats.damagedCount} 个，警告 ${state.scanResults.stats.warningCount} 个，非标准 ${state.scanResults.stats.nonstandardCount} 个，自动分类 ${state.scanResults.autoClassifiedCount} 个${prunedTotal > 0 ? `，清理已删除记录 ${prunedTotal} 条（日志 ${pruneScan.logLines} 行）` : ''}`);
   saveState();
   return state.scanResults;
 });
@@ -1811,24 +1937,8 @@ ipcMain.handle('set-chinese-name', async (event, modPath, chineseName) => {
 });
 
 // ============ IPC: 分类与打标签 ============
-ipcMain.handle('set-classification', async (event, modPath, classification) => {
-  // 用户手动设置，标记 __manual，避免被后续自动分类覆盖
-  const saved = {
-    ...classification,
-    __auto: false,
-    __manual: true,
-  };
-  state.classifications[modPath] = saved;
-  // 同步标签
-  if (classification.tags) {
-    for (const t of classification.tags) {
-      if (!state.tags.includes(t)) state.tags.push(t);
-    }
-  }
-  opLog('SET_CLASSIFICATION', `${modPath} -> ${JSON.stringify(classification.category || [])} / tags: ${JSON.stringify(classification.tags || [])}`);
-  saveState();
-  return { ok: true };
-});
+// 注意：set-classification 的统一实现在文件末尾“功能七：标签修正分类”一节
+// （原此处重复注册会导致 Electron 启动崩溃，已移除并合并）
 
 ipcMain.handle('get-classifications', async () => {
   return state.classifications;
@@ -1836,6 +1946,46 @@ ipcMain.handle('get-classifications', async () => {
 
 ipcMain.handle('get-categories', async () => {
   return state.categories;
+});
+
+/**
+ * 保存分类树（支持重命名 / 新增 / 删除 / 拖动调整层级）
+ * payload: { tree, renamedPaths: [{oldPath, newPath}], removedPaths: [[...]] }
+ * 重命名/移动会同步更新已有分类记录；删除会把受影响文件分类重置为“未识别”
+ */
+ipcMain.handle('update-categories', async (event, payload) => {
+  const tree = payload && payload.tree;
+  const renamedPaths = (payload && payload.renamedPaths) || [];
+  const removedPaths = (payload && payload.removedPaths) || [];
+  if (!Array.isArray(tree)) return { ok: false, error: '分类树数据错误' };
+  const joinPath = (arr) => (Array.isArray(arr) ? arr.join('/') : String(arr));
+  // 重命名 / 移动：同步分类记录中的路径
+  for (const r of renamedPaths) {
+    if (!r || !Array.isArray(r.oldPath) || !Array.isArray(r.newPath)) continue;
+    const oldKey = joinPath(r.oldPath);
+    const newKey = joinPath(r.newPath);
+    if (oldKey === newKey) continue;
+    for (const k of Object.keys(state.classifications)) {
+      const c = state.classifications[k];
+      if (c && joinPath(c.category) === oldKey) c.category = r.newPath.slice();
+    }
+  }
+  // 删除：受影响文件的分类重置为“未识别”（仅当仍存在“未识别”时）并转为自动来源
+  for (const rm of removedPaths) {
+    const rmKey = joinPath(rm);
+    for (const k of Object.keys(state.classifications)) {
+      const c = state.classifications[k];
+      if (c && joinPath(c.category).startsWith(rmKey)) {
+        c.category = ['未识别'];
+        c.__categorySource = 'auto';
+        c.__tagCorrected = false;
+      }
+    }
+  }
+  state.categories = tree;
+  saveState();
+  opLog('UPDATE_CATEGORIES', `分类树已更新（${renamedPaths.length} 项重命名/移动，${removedPaths.length} 项删除）`);
+  return { ok: true, categories: state.categories };
 });
 
 ipcMain.handle('add-category', async (event, parentPath, name) => {
@@ -1865,11 +2015,55 @@ ipcMain.handle('add-category', async (event, parentPath, name) => {
   return { ok: true, categories: state.categories };
 });
 
-ipcMain.handle('add-tag', async (event, tag) => {
-  if (tag && !state.tags.includes(tag)) {
-    state.tags.push(tag);
-    saveState();
+/**
+ * 添加手动标签：tag 可为字符串或 { name, category }
+ * category 为该标签绑定的目标分类文件夹路径数组（如 ['Build Mode Items','建筑类模组']）
+ */
+ipcMain.handle('add-tag', async (event, tag, categoryPath) => {
+  const name = typeof tag === 'string' ? tag.trim() : (tag && String(tag.name || '').trim());
+  if (!name) return { ok: false, error: '标签名不能为空' };
+  const cat = Array.isArray(categoryPath) && categoryPath.length > 0 ? categoryPath.slice() : null;
+  const existingIdx = state.tags.findIndex(t => (typeof t === 'string' ? t : t.name) === name);
+  if (existingIdx >= 0) {
+    const old = state.tags[existingIdx];
+    const oldCat = (old && typeof old === 'object' && Array.isArray(old.category)) ? old.category : null;
+    state.tags[existingIdx] = { name, source: 'manual', category: cat || oldCat };
+  } else {
+    state.tags.push({ name, source: 'manual', category: cat });
   }
+  saveState();
+  return { ok: true, tags: state.tags };
+});
+
+/**
+ * 更新手动标签（重命名 / 修改绑定的目标分类），同步所有文件上的标签引用
+ */
+ipcMain.handle('update-tag', async (event, oldName, tagObj) => {
+  const newName = (tagObj && String(tagObj.name || '').trim()) || oldName;
+  if (!oldName || !newName) return { ok: false, error: '标签名不能为空' };
+  // 未显式传 category 字段（如仅重命名）时，保留原有绑定分类；显式传 null/空数组表示解除绑定
+  const existing = state.tags.find(t => (typeof t === 'string' ? t : t.name) === oldName);
+  const hasCategoryField = tagObj && Object.prototype.hasOwnProperty.call(tagObj, 'category');
+  const cat = hasCategoryField
+    ? ((Array.isArray(tagObj.category) && tagObj.category.length > 0) ? tagObj.category.slice() : null)
+    : ((existing && typeof existing === 'object' && Array.isArray(existing.category) && existing.category.length > 0) ? existing.category.slice() : null);
+  if (newName !== oldName && state.tags.some(t => (typeof t === 'string' ? t : t.name) === newName)) {
+    return { ok: false, error: '已存在同名标签' };
+  }
+  state.tags = state.tags.map(t => {
+    const n = typeof t === 'string' ? t : t.name;
+    if (n === oldName) return { name: newName, source: 'manual', category: cat };
+    return t;
+  });
+  // 同步文件分类记录中的标签名
+  for (const k of Object.keys(state.classifications)) {
+    const c = state.classifications[k];
+    if (c && Array.isArray(c.tags)) {
+      c.tags = c.tags.map(t => (t === oldName ? newName : t));
+    }
+  }
+  saveState();
+  opLog('UPDATE_TAG', `${oldName} -> ${newName}${cat ? '，绑定分类 ' + cat.join('/') : ''}`);
   return { ok: true, tags: state.tags };
 });
 
@@ -1878,10 +2072,11 @@ ipcMain.handle('get-tags', async () => {
 });
 
 ipcMain.handle('remove-tag', async (event, tag) => {
-  state.tags = state.tags.filter(t => t !== tag);
+  const name = typeof tag === 'string' ? tag : (tag && tag.name);
+  state.tags = state.tags.filter(t => (typeof t === 'string' ? t : t.name) !== name);
   for (const k of Object.keys(state.classifications)) {
     if (state.classifications[k].tags) {
-      state.classifications[k].tags = state.classifications[k].tags.filter(t => t !== tag);
+      state.classifications[k].tags = state.classifications[k].tags.filter(t => t !== name);
     }
   }
   saveState();
@@ -1895,7 +2090,21 @@ ipcMain.handle('execute-move', async () => {
   const errors = [];
   const skipped = [];
 
+  // 顺带清理：路径已不存在或不在 Mods 目录内的记录直接移除，不再出现在结果中
+  const rootKey = pathKey(state.modsFolder);
+  for (const key of Object.keys(state.classifications)) {
+    if (!pathKey(key).startsWith(rootKey) || !fileExistsTolerant(key)) {
+      delete state.classifications[key];
+    }
+  }
+
   for (const [modPath, classification] of Object.entries(state.classifications)) {
+    // 已删除的文件不重试移动（深度扫描/执行移动时同步清理）
+    if (!fs.existsSync(modPath)) {
+      delete state.classifications[modPath];
+      skipped.push({ path: modPath, reason: '文件已不存在，已清理记录' });
+      continue;
+    }
     if (!classification.category || classification.category.length === 0) {
       skipped.push({ path: modPath, reason: '未设置分类' });
       continue;
@@ -2158,23 +2367,33 @@ function toggleDisabled(filePath, enable) {
   }
 }
 
+/**
+ * 切换成功后将新路径同步进 scanResults 与 classifications（两个页面共享同一份数据）
+ */
+function syncToggledPath(oldPath, newPath) {
+  if (!state.scanResults) return;
+  const f = state.scanResults.files.find(x => x.path === oldPath);
+  if (f) {
+    f.path = newPath;
+    f.name = path.basename(newPath);
+    f.ext = path.extname(newPath).toLowerCase();
+    f.disabled = f.name.toLowerCase().endsWith('.disabled');
+    const realBase = f.disabled ? f.name.slice(0, -'.disabled'.length) : f.name;
+    f.modExt = (path.extname(realBase).toLowerCase() === '.package' || path.extname(realBase).toLowerCase() === '.ts4script') ? path.extname(realBase).toLowerCase() : '';
+    f.relPath = path.relative(state.modsFolder, newPath);
+  }
+  if (state.classifications[oldPath]) {
+    state.classifications[newPath] = state.classifications[oldPath];
+    delete state.classifications[oldPath];
+  }
+}
+
 ipcMain.handle('toggle-mod', async (event, filePath, enable) => {
   if (!state.modsFolder) return { error: '未设置 Mods 文件夹' };
   const r = toggleDisabled(filePath, !!enable);
   // 同步更新 scanResults 中的路径
-  if (r.ok && !r.noChange && state.scanResults) {
-    const f = state.scanResults.files.find(x => x.path === filePath);
-    if (f) {
-      f.path = r.path;
-      f.name = path.basename(r.path);
-      f.ext = path.extname(r.path).toLowerCase();
-      f.relPath = path.relative(state.modsFolder, r.path);
-    }
-    // 同步 classifications 的 key
-    if (state.classifications[filePath]) {
-      state.classifications[r.path] = state.classifications[filePath];
-      delete state.classifications[filePath];
-    }
+  if (r.ok && !r.noChange) {
+    syncToggledPath(filePath, r.path);
     saveState();
   }
   return r;
@@ -2186,22 +2405,65 @@ ipcMain.handle('toggle-mod-batch', async (event, paths, enable) => {
   for (const p of paths) {
     const r = toggleDisabled(p, !!enable);
     results.push(r);
-    if (r.ok && !r.noChange && state.scanResults) {
-      const f = state.scanResults.files.find(x => x.path === p);
-      if (f) {
-        f.path = r.path;
-        f.name = path.basename(r.path);
-        f.ext = path.extname(r.path).toLowerCase();
-        f.relPath = path.relative(state.modsFolder, r.path);
-      }
-      if (state.classifications[p]) {
-        state.classifications[r.path] = state.classifications[p];
-        delete state.classifications[p];
-      }
+    if (r.ok && !r.noChange) {
+      syncToggledPath(p, r.path);
     }
   }
   saveState();
   return { results, okCount: results.filter(r => r.ok).length };
+});
+
+// ============ 需求一：锚定文件夹级停用 / 恢复（递归遍历整个文件夹） ============
+/**
+ * 递归收集文件夹下所有 MOD 文件（含已停用的 .disabled 文件）
+ */
+function isModFileName(name) {
+  const lower = String(name).toLowerCase();
+  return lower.endsWith('.package') || lower.endsWith('.ts4script') ||
+         lower.endsWith('.package.disabled') || lower.endsWith('.ts4script.disabled');
+}
+
+ipcMain.handle('get-anchor-files', async (event, folderPath) => {
+  if (!folderPath) return { error: '未提供文件夹路径' };
+  const files = [];
+  await walkDir(folderPath, async (file) => {
+    const name = path.basename(file);
+    if (!isModFileName(name)) return;
+    const stat = await fsp.stat(file).catch(() => null);
+    const disabled = name.toLowerCase().endsWith('.disabled');
+    const realBase = disabled ? name.slice(0, -'.disabled'.length) : name;
+    files.push({
+      path: file,
+      name,
+      disabled,
+      ext: path.extname(realBase).toLowerCase(),
+      size: stat ? stat.size : 0,
+      mtime: stat ? stat.mtime.toISOString() : '',
+      anchored: true,
+    });
+  });
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return { files };
+});
+
+ipcMain.handle('toggle-folder-mod', async (event, folderPath, enable) => {
+  if (!folderPath) return { ok: false, error: '未提供文件夹路径' };
+  const modFiles = [];
+  await walkDir(folderPath, (file) => {
+    if (isModFileName(path.basename(file))) modFiles.push(file);
+  });
+  if (modFiles.length === 0) return { ok: false, error: '该文件夹下没有可停用的 MOD 文件' };
+  const results = [];
+  for (const p of modFiles) {
+    const r = toggleDisabled(p, !!enable);
+    results.push(r);
+    if (r.ok && !r.noChange) {
+      syncToggledPath(p, r.path);
+    }
+  }
+  saveState();
+  opLog(enable ? 'ENABLE_FOLDER' : 'DISABLE_FOLDER', `${folderPath} 下 ${modFiles.length} 个 MOD 已${enable ? '恢复' : '停用'}`);
+  return { ok: true, results, okCount: results.filter(r => r.ok).length, total: modFiles.length };
 });
 
 // ============ 功能四：拖拽导入与自动解压 ============
@@ -2426,7 +2688,7 @@ ipcMain.handle('create-mods-folder', async () => {
 });
 
 // ============ 功能七：标签修正分类（重点） ============
-// 收集所有叶子分类名称 → 完整路径映射
+// 收集所有分类节点（含中间层）名称 → 完整路径映射
 function collectCategoryLeaves(nodes, parentPath = []) {
   const map = {};
   for (const n of nodes) {
@@ -2434,7 +2696,7 @@ function collectCategoryLeaves(nodes, parentPath = []) {
     if (n.children && n.children.length > 0) {
       Object.assign(map, collectCategoryLeaves(n.children, fullPath));
     }
-    // 叶子节点（以及每一级）都可以作为标签匹配目标
+    // 每一级节点都可以作为标签匹配目标
     map[n.name] = fullPath;
   }
   return map;
@@ -2449,32 +2711,92 @@ function inferCategoryFromTags(tags, categories) {
   return null;
 }
 
+// 获取手动标签对象（兼容旧的字符串标签）
+function getTagObject(name) {
+  if (!name) return null;
+  const t = state.tags.find(x => (typeof x === 'string' ? x : x.name) === name);
+  if (!t) return null;
+  return typeof t === 'string' ? { name: t, source: 'manual', category: null } : t;
+}
+
+/**
+ * 统一分类优先级（需求三）：
+ *   1. 用户手动指定的分类（payload.category 显式给出）→ 最高
+ *   2. 手动标签推断：标签绑定分类 > 标签名匹配分类树 → 次高
+ *   3. 都不命中时保留原系统自动分类
+ * 若手动结果与系统自动分类不一致，返回 conflict 供前端提示（不阻止用户选择）
+ */
 ipcMain.handle('set-classification', async (event, modPath, classification) => {
-  // 用户手动设置，标记 __manual，避免被后续自动分类覆盖
-  // 功能七增强：如果标签匹配分类名，自动将标签转为分类修正
-  let category = (classification && classification.category) || [];
-  const tags = (classification && classification.tags) || [];
-  const inferred = inferCategoryFromTags(tags, state.categories);
-  // 如果用户没有显式选分类，但标签匹配到了分类，则用标签推断的分类
-  if ((!category || category.length === 0) && inferred) {
-    category = inferred;
+  if (!modPath) return { ok: false, error: '缺少文件路径' };
+  const explicitCategory = (classification && Array.isArray(classification.category) && classification.category.length > 0)
+    ? classification.category.slice() : null;
+  const tags = (classification && Array.isArray(classification.tags)) ? classification.tags.slice() : [];
+
+  // 2) 标签推断
+  let inferred = null;
+  let inferredBy = null;
+  if (!explicitCategory) {
+    for (const t of tags) {
+      const tagObj = getTagObject(t);
+      const mapped = tagObj && Array.isArray(tagObj.category) && tagObj.category.length > 0 ? tagObj.category.slice() : null;
+      if (mapped) { inferred = mapped; inferredBy = 'tag-map'; break; }
+      const byName = inferCategoryFromTags([t], state.categories);
+      if (byName) { inferred = byName; inferredBy = 'tag-name'; break; }
+    }
   }
+
+  // 3) 手动标签也未命中的，保留现有记录中的分类（可能是系统自动分类）
+  const prev = state.classifications[modPath] || null;
+  let category;
+  if (explicitCategory) {
+    category = explicitCategory;
+  } else if (inferred) {
+    category = inferred;
+  } else if (prev && Array.isArray(prev.category) && prev.category.length > 0) {
+    category = prev.category.slice();
+  } else {
+    category = [];
+  }
+
+  // 系统自动分类（用于冲突提示展示）
+  const systemCategory = prev && prev.__categorySource === 'auto' && Array.isArray(prev.category) && prev.category.length > 0
+    ? prev.category.slice() : null;
+  const chosenByManual = !!(explicitCategory || inferred);
+  let conflict = null;
+  if (chosenByManual && systemCategory && systemCategory.join('/') !== category.join('/')) {
+    conflict = {
+      systemCategory,
+      chosenCategory: category,
+      source: explicitCategory ? 'manual' : 'tag',
+    };
+  }
+
   const saved = {
     ...classification,
     category,
     tags,
     __auto: false,
     __manual: true,
-    __tagCorrected: !!inferred && (!classification.category || classification.category.length === 0),
+    __categorySource: explicitCategory ? 'manual' : (inferred ? 'tag' : (prev && prev.__categorySource ? prev.__categorySource : 'auto')),
+    __tagCorrected: !!inferred,
+    __systemCategory: systemCategory, // 保留系统自动分类用于冲突提示
   };
   state.classifications[modPath] = saved;
-  // 同步标签
+  // 同步标签（新标签以手动标签入库）
   for (const t of tags) {
-    if (!state.tags.includes(t)) state.tags.push(t);
+    if (!state.tags.some(x => (typeof x === 'string' ? x : x.name) === t)) {
+      state.tags.push({ name: t, source: 'manual', category: null });
+    }
   }
-  opLog('SET_CLASSIFICATION', `${modPath} -> ${JSON.stringify(category)} / tags: ${JSON.stringify(tags)}${saved.__tagCorrected ? ' (标签修正分类)' : ''}`);
+  opLog('SET_CLASSIFICATION', `${modPath} -> ${JSON.stringify(category)} / tags: ${JSON.stringify(tags)}${inferred ? ` (标签推断: ${inferredBy})` : ''}${conflict ? ' (与系统分类冲突，以手动为准)' : ''}`);
   saveState();
-  return { ok: true, tagCorrected: !!saved.__tagCorrected };
+  return {
+    ok: true,
+    tagCorrected: !!inferred,
+    category,
+    categorySource: saved.__categorySource,
+    conflict,
+  };
 });
 
 // ============ IPC: 重置 ============

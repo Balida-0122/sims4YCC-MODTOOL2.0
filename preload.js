@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('api', {
   addAnchor: (paths) => ipcRenderer.invoke('add-anchor', paths),
   removeAnchor: (p) => ipcRenderer.invoke('remove-anchor', p),
   getRootFolders: () => ipcRenderer.invoke('get-root-folders'),
+  // 需求一：锚定文件夹内文件列举 + 整个文件夹停用/恢复
+  getAnchorFiles: (folderPath) => ipcRenderer.invoke('get-anchor-files', folderPath),
+  toggleFolderMod: (folderPath, enable) => ipcRenderer.invoke('toggle-folder-mod', folderPath, enable),
 
   // 重复排查
   scanDuplicates: () => ipcRenderer.invoke('scan-duplicates'),
@@ -58,7 +61,10 @@ contextBridge.exposeInMainWorld('api', {
   getClassifications: () => ipcRenderer.invoke('get-classifications'),
   getCategories: () => ipcRenderer.invoke('get-categories'),
   addCategory: (parentPath, name) => ipcRenderer.invoke('add-category', parentPath, name),
-  addTag: (tag) => ipcRenderer.invoke('add-tag', tag),
+  // 需求三：分类树整体保存（重命名/删除/拖动层级）+ 标签对象化管理
+  updateCategories: (payload) => ipcRenderer.invoke('update-categories', payload),
+  addTag: (tag, categoryPath) => ipcRenderer.invoke('add-tag', tag, categoryPath),
+  updateTag: (oldName, tagObj) => ipcRenderer.invoke('update-tag', oldName, tagObj),
   getTags: () => ipcRenderer.invoke('get-tags'),
   removeTag: (tag) => ipcRenderer.invoke('remove-tag', tag),
 

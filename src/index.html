@@ -201,6 +201,13 @@
             <input type="text" id="anchorSearch" class="search-input" placeholder="搜索已锚定项目...">
             <button id="btnSelectAllSearch" class="btn btn-sm">全选当前结果</button>
             <button id="btnBatchAddAnchor" class="btn btn-sm btn-primary">批量添加锚定</button>
+            <button id="btnAnchorBatchDisable" class="btn btn-sm" title="批量停用展开列表中勾选的文件（添加 .disabled 后缀）">批量停用</button>
+            <button id="btnAnchorBatchEnable" class="btn btn-sm" title="批量恢复展开列表中勾选的文件（移除 .disabled 后缀）">批量恢复</button>
+            <span id="anchorSelectedCount" class="count-text">已选 0 个文件</span>
+          </div>
+          <div class="anchor-info-banner">
+            <strong>锚定保护：</strong>含 .ts4script 的文件夹内文件拥有最高保留优先级，不会被其他同名或冲突文件覆盖或删除。<br>
+            <strong>停用管理（新）：</strong>锚定文件夹支持展开/折叠，展开后显示文件夹内所有文件，可单独或勾选多选后批量停用/恢复；也可一键“停用整个文件夹”或“恢复整个文件夹”（为全部 .package/.ts4script 添加/移除 .disabled 后缀）。停用状态与“分类与打标签”页面共享同步。
           </div>
           <div class="anchor-layout">
             <div class="anchor-panel">
@@ -335,15 +342,20 @@
         <section class="page" id="page-classify">
           <h2 class="page-title">分类与打标签</h2>
           <div class="classify-info-banner">
-            <strong>自动分类优先，手动微调为辅：</strong>深度扫描完成后系统已按关键词自动为 MOD 归类（标有"自动"标记），你可直接执行"创建并移动"。若需调整，可重新选择分类或标签后应用（会标记为"手动"并保持不被覆盖）。<br>
-            <strong>标签修正分类（重点）：</strong>如果给 MOD 打的标签恰好是某个分类名称（如"建筑类模组"），工具会自动把该标签作为分类修正指令，在"创建并移动"时将文件移动到对应分类文件夹，优先级高于系统自动分类。<br>
-            分类仅逻辑记录目标存储路径（不移动文件），标签仅用于筛选检索。已锚定模组可查看但不可分类（标注"已锚定"）。标签筛选结果优先于名称排序。每个 MOD 可单独查看预览图与资源类型、一键启用/停用。
+            <strong>手动标签优先，系统标签辅助：</strong>深度扫描完成后系统已按关键词自动为 MOD 归类（标有"自动分类"标记）。你也可以自由创建手动标签（可同时指定该标签对应的目标分类文件夹），打标签与分类的优先级：<br>
+            ① 手动指定的分类 &gt; ② 手动标签推断的分类 &gt; ③ 系统自动分类（仅作兜底）。若手动标签与系统自动分类不一致，界面会给出提示，但最终以你的选择为准。<br>
+            <strong>系统标签管理：</strong>系统标签即分类树中的分类节点，可在右侧分类树中重命名、增删子类、拖动调整层级，修改会保存到本地配置并同步已有分类记录。标签筛选可切换"全部标签 / 仅手动标签 / 仅系统标签"。
           </div>
           <div class="classify-layout">
             <!-- 左侧：文件列表 -->
             <div class="classify-files">
               <div class="classify-toolbar">
                 <input type="text" id="classifySearch" class="search-input" placeholder="搜索文件名...">
+                <select id="tagSourceFilter" class="select-input" title="按标签来源筛选">
+                  <option value="all">全部标签</option>
+                  <option value="manual">仅手动标签</option>
+                  <option value="system">仅系统标签</option>
+                </select>
                 <select id="tagFilter" class="select-input"><option value="">按标签筛选</option></select>
                 <button id="btnBatchEnable" class="btn btn-sm" title="批量启用选中的 MOD">批量启用</button>
                 <button id="btnBatchDisable" class="btn btn-sm" title="批量停用选中的 MOD（添加 .disabled 后缀）">批量停用</button>
@@ -355,16 +367,22 @@
             <div class="classify-panel">
               <h3>批量操作</h3>
               <div class="panel-section">
-                <label class="panel-label">选择分类</label>
+                <label class="panel-label">选择分类（系统标签：可重命名/拖动调整层级）</label>
                 <div id="categoryTree" class="category-tree"></div>
+                <div class="category-tree-actions">
+                  <button id="btnAddRootCategory" class="btn btn-sm" title="添加顶级分类">＋ 顶级分类</button>
+                  <span class="panel-hint">悬浮节点可 ✏ 重命名 / ＋ 子类 / 🗑 删除；按住节点拖动可调整层级</span>
+                </div>
                 <div class="selected-category" id="selectedCategoryDisplay">未选择分类</div>
               </div>
               <div class="panel-section">
-                <label class="panel-label">添加标签</label>
+                <label class="panel-label">添加手动标签（可同时指定目标分类文件夹）</label>
                 <div class="tag-input-row">
-                  <input type="text" id="tagInput" class="text-input" placeholder="输入标签名...">
+                  <input type="text" id="tagInput" class="text-input" placeholder="输入标签名，如：建筑专属">
+                  <select id="tagCategorySelect" class="select-input" title="该标签绑定的目标分类（打上此标签即归入该分类）"><option value="">不指定分类</option></select>
                   <button id="btnAddTag" class="btn btn-sm btn-primary">添加</button>
                 </div>
+                <div id="tagManagerList" class="tag-manager-list"></div>
                 <div id="tagSuggestions" class="tag-suggestions"></div>
                 <div id="selectedTags" class="selected-tags"></div>
               </div>
