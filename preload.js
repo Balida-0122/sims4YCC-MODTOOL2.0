@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('api', {
   setBackupFolder: (folder) => ipcRenderer.invoke('set-backup-folder', folder),
   resetBackupFolder: () => ipcRenderer.invoke('reset-backup-folder'),
 
+  // 应用版本号
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
   // S4S (Sims 4 Studio) 联动
   getS4SPath: () => ipcRenderer.invoke('get-s4s-path'),
   selectS4SPath: () => ipcRenderer.invoke('select-s4s-path'),

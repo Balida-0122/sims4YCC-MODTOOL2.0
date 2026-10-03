@@ -62,6 +62,16 @@ body {
   font-weight: 600;
   color: var(--accent-hover);
 }
+.app-version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 .mods-path {
   color: var(--text-secondary);
   font-size: 12px;

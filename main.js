@@ -2187,6 +2187,10 @@ ipcMain.handle('select-s4s-path', async () => {
   return { canceled: false, path: v };
 });
 
+ipcMain.handle('get-app-version', async () => {
+  return app.getVersion();
+});
+
 ipcMain.handle('open-with-s4s', async (event, filePath) => {
   try {
     const r = await openWithS4S(filePath);

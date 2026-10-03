@@ -168,6 +168,19 @@ async function init() {
   bindNavigation();
   bindTopbar();
   bindGlobalEvents();
+
+  // 加载并显示应用版本号
+  try {
+    const version = await api.getAppVersion();
+    if (version) {
+      const el = $('#appVersion');
+      if (el) el.textContent = version;
+      document.title = `Sims4YCC MOD 管理工具 ${version}`;
+    }
+  } catch (e) {
+    console.error('获取版本号失败:', e);
+  }
+
   renderOverview();
 }
 
