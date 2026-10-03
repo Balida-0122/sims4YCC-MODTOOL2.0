@@ -4,8 +4,9 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const crypto = require('crypto');
 const https = require('https');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { Worker } = require('worker_threads');
+const os = require('os');
 
 const DATA_FILE = path.join(app.getPath('userData'), 'sims4ycc-state.json');
 const OPER_LOG = path.join(__dirname, 'operations.log');
@@ -2077,6 +2078,120 @@ ipcMain.handle('ai-chat', async (event, messages) => {
       ...messages,
     ], state.translationConfig);
     return { ok: true, reply };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ============ S4S (Sims 4 Studio) 联动 ============
+const S4S_CANDIDATES = [
+  { platform: 'win32', path: path.join('C:', 'Program Files', 'Sims 4 Studio', 'Sims4Studio.exe') },
+  { platform: 'win32', path: path.join('C:', 'Program Files (x86)', 'Sims 4 Studio', 'Sims4Studio.exe') },
+  { platform: 'darwin', path: path.join(os.homedir(), 'Applications', 'Sims 4 Studio.app'), isMacApp: true },
+  { platform: 'darwin', path: path.join('/Applications', 'Sims 4 Studio.app'), isMacApp: true },
+];
+
+function findS4SExecutable() {
+  // 优先用户自定义路径
+  const custom = state.settings && state.settings.s4sPath ? String(state.settings.s4sPath).trim() : '';
+  if (custom) {
+    if (fs.existsSync(custom)) {
+      const lower = custom.toLowerCase();
+      return { path: custom, isMacApp: lower.endsWith('.app') };
+    }
+  }
+  // 探测常见安装路径
+  for (const c of S4S_CANDIDATES) {
+    if (c.platform && c.platform !== process.platform) continue;
+    if (fs.existsSync(c.path)) {
+      return { path: c.path, isMacApp: !!c.isMacApp };
+    }
+  }
+  return null;
+}
+
+function openWithS4S(filePath) {
+  return new Promise((resolve, reject) => {
+    if (!filePath) {
+      reject(new Error('未提供文件路径'));
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.disabled') {
+      reject(new Error('无法打开 .disabled 停用文件，请先恢复该文件'));
+      return;
+    }
+    if (ext !== '.package') {
+      reject(new Error('Sims 4 Studio 只能打开 .package 文件'));
+      return;
+    }
+    const s4s = findS4SExecutable();
+    if (!s4s) {
+      reject(new Error('未找到 Sims 4 Studio，请在设置中手动指定安装路径'));
+      return;
+    }
+    let proc;
+    if (process.platform === 'darwin' && s4s.isMacApp) {
+      proc = spawn('open', ['-a', s4s.path, filePath], { detached: true });
+    } else {
+      proc = spawn(s4s.path, [filePath], { detached: true, shell: false });
+    }
+    proc.on('error', (err) => reject(err));
+    // 短暂等待，若进程正常启动则认为成功
+    setTimeout(() => {
+      resolve({ ok: true, path: s4s.path });
+    }, 500);
+  });
+}
+
+ipcMain.handle('get-s4s-path', async () => {
+  const found = findS4SExecutable();
+  return {
+    custom: (state.settings && state.settings.s4sPath) || '',
+    detected: found ? found.path : '',
+  };
+});
+
+ipcMain.handle('set-s4s-path', async (event, p) => {
+  const v = String(p || '').trim();
+  if (!v) {
+    state.settings = state.settings || {};
+    delete state.settings.s4sPath;
+    saveState();
+    return { ok: true, path: '' };
+  }
+  if (!fs.existsSync(v)) {
+    return { ok: false, error: '指定路径不存在' };
+  }
+  state.settings = state.settings || {};
+  state.settings.s4sPath = v;
+  saveState();
+  return { ok: true, path: v };
+});
+
+ipcMain.handle('select-s4s-path', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: process.platform === 'darwin' ? ['openDirectory'] : ['openFile'],
+    title: process.platform === 'darwin' ? '选择 Sims 4 Studio.app' : '选择 Sims4Studio.exe',
+    defaultPath: process.platform === 'darwin' ? '/Applications' : 'C:\\Program Files',
+    filters: process.platform === 'darwin' ? undefined : [
+      { name: 'Sims 4 Studio', extensions: ['exe'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+  const v = result.filePaths[0];
+  state.settings = state.settings || {};
+  state.settings.s4sPath = v;
+  saveState();
+  return { canceled: false, path: v };
+});
+
+ipcMain.handle('open-with-s4s', async (event, filePath) => {
+  try {
+    const r = await openWithS4S(filePath);
+    opLog('OPEN_WITH_S4S', `${filePath} -> ${r.path}`);
+    return r;
   } catch (e) {
     return { error: e.message };
   }

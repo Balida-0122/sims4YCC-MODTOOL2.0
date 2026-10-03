@@ -87,6 +87,12 @@ function dirname(p) {
   const np = normalizePath(p);
   return np.split('/').slice(0, -1).join('/') || np;
 }
+function extname(p) {
+  if (!p) return '';
+  const base = basename(p);
+  const idx = base.lastIndexOf('.');
+  return idx > 0 ? base.slice(idx) : '';
+}
 function isAnchoredFile(filePath) {
   const fp = normalizePath(filePath);
   return appState.anchored.some(a => fp.startsWith(normalizePath(a)));
@@ -396,6 +402,16 @@ async function openModDetail(filePath) {
   $('#modDetailResources').innerHTML = '<span class="loading"></span> 正在解析...';
   $('#modDetailMeta').textContent = filePath;
   if ($('#aiClassifyResult')) $('#aiClassifyResult').textContent = '';
+  const btnS4S = $('#btnOpenWithS4S');
+  if (btnS4S) {
+    const ext = extname(filePath).toLowerCase();
+    if (ext === '.package') {
+      btnS4S.classList.remove('hidden');
+      btnS4S.disabled = false;
+    } else {
+      btnS4S.classList.add('hidden');
+    }
+  }
 
   try {
     const r = await api.getModDetail(filePath);
@@ -450,6 +466,29 @@ function bindAISidebar() {
       }
     });
   }
+  // 详情页 S4S 打开按钮
+  const btnS4S = $('#btnOpenWithS4S');
+  if (btnS4S) {
+    btnS4S.addEventListener('click', async () => {
+      const filePath = appState.currentDetailFilePath;
+      if (!filePath) return;
+      btnS4S.disabled = true;
+      const res = await api.openWithS4S(filePath);
+      btnS4S.disabled = false;
+      if (res.error) {
+        toast(res.error, 'error');
+        if (res.error.includes('未找到 Sims 4 Studio')) {
+          const r = await api.selectS4SPath();
+          if (r && !r.canceled && r.path) {
+            toast('已设置 S4S 路径：' + r.path + '，请重新点击打开', 'success');
+          }
+        }
+      } else {
+        toast('已用 Sims 4 Studio 打开', 'success');
+      }
+    });
+  }
+
   // 详情页 AI 识别分类按钮
   const btnClassify = $('#btnAIClassifyDetail');
   if (btnClassify) {
@@ -2020,6 +2059,28 @@ function bindSettingsPage() {
       }
     });
   }
+  // S4S 安装路径设置
+  const btnSelectS4S = $('#btnSelectS4SPath');
+  const btnResetS4S = $('#btnResetS4SPath');
+  if (btnSelectS4S) {
+    btnSelectS4S.addEventListener('click', async () => {
+      const r = await api.selectS4SPath();
+      if (r && !r.canceled && r.path) {
+        $('#txtS4SPath').value = r.path;
+        toast('S4S 路径已设置为：' + r.path, 'success');
+      }
+    });
+  }
+  if (btnResetS4S) {
+    btnResetS4S.addEventListener('click', async () => {
+      const r = await api.setS4SPath('');
+      if (r && r.ok) {
+        const s = await api.getS4SPath();
+        $('#txtS4SPath').value = s.detected || '';
+        toast(s.detected ? '已恢复自动探测路径：' + s.detected : '已清除自定义路径，将自动探测', 'success');
+      }
+    });
+  }
   console.log('[bindSettingsPage] 绑定完成');
 }
 
@@ -2051,6 +2112,14 @@ async function loadSettingsPage() {
     const txtBackup = $('#txtBackupFolder');
     if (txtBackup) {
       try { txtBackup.value = await api.getBackupFolder(); } catch (e) {}
+    }
+    // 加载 S4S 路径
+    const txtS4S = $('#txtS4SPath');
+    if (txtS4S) {
+      try {
+        const s = await api.getS4SPath();
+        txtS4S.value = s.custom || s.detected || '';
+      } catch (e) {}
     }
   } catch (e) {
     console.error('加载设置失败:', e);

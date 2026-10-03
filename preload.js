@@ -90,6 +90,12 @@ contextBridge.exposeInMainWorld('api', {
   setBackupFolder: (folder) => ipcRenderer.invoke('set-backup-folder', folder),
   resetBackupFolder: () => ipcRenderer.invoke('reset-backup-folder'),
 
+  // S4S (Sims 4 Studio) 联动
+  getS4SPath: () => ipcRenderer.invoke('get-s4s-path'),
+  selectS4SPath: () => ipcRenderer.invoke('select-s4s-path'),
+  setS4SPath: (p) => ipcRenderer.invoke('set-s4s-path', p),
+  openWithS4S: (filePath) => ipcRenderer.invoke('open-with-s4s', filePath),
+
   // AI 功能（复用翻译配置中的 DeepSeek/OpenAI 兼容接口）
   aiAnalyzeConflict: (group) => ipcRenderer.invoke('ai-analyze-conflict', group),
   aiClassifyFile: (fileInfo) => ipcRenderer.invoke('ai-classify-file', fileInfo),

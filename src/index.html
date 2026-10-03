@@ -499,6 +499,26 @@
               </div>
             </div>
           </div>
+
+          <div class="settings-section">
+            <h3 class="settings-title">Sims 4 Studio 联动</h3>
+            <div class="settings-row">
+              <label class="settings-label">S4S 安装路径</label>
+              <div style="flex:1;display:flex;gap:8px;align-items:center;">
+                <input type="text" id="txtS4SPath" class="search-input" placeholder="自动探测（Windows: Program Files/Sims 4 Studio; macOS: Applications）" style="flex:1" readonly>
+                <button id="btnSelectS4SPath" class="btn btn-sm">浏览…</button>
+                <button id="btnResetS4SPath" class="btn btn-sm">自动探测</button>
+              </div>
+            </div>
+            <div class="settings-row" style="align-items:flex-start;">
+              <label class="settings-label">说明</label>
+              <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
+                · 在 MOD 详情页点击"用 Sims 4 Studio 打开"即可直接唤出 S4S 编辑当前 .package 文件。<br>
+                · 若自动探测未找到，请手动选择 Sims4Studio.exe（Windows）或 Sims 4 Studio.app（macOS）。<br>
+                · 仅支持 .package 文件；.disabled 停用文件和 .ts4script 脚本文件无法直接用 S4S 打开。
+              </div>
+            </div>
+          </div>
         </section>
       </main>
     </div>
@@ -563,9 +583,10 @@
             <div class="mod-detail-info">
               <div class="mod-detail-name" id="modDetailName"></div>
               <div class="mod-detail-meta" id="modDetailMeta"></div>
-              <div style="margin:8px 0 12px;">
+              <div style="margin:8px 0 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                 <button id="btnAIClassifyDetail" class="btn btn-sm btn-ai" title="使用 AI 判断该 MOD 应归属的分类（需配置 DeepSeek/OpenAI 兼容接口）">🤖 AI 识别分类</button>
-                <span id="aiClassifyResult" style="font-size:12px;color:var(--text-secondary);margin-left:8px;"></span>
+                <span id="aiClassifyResult" style="font-size:12px;color:var(--text-secondary);"></span>
+                <button id="btnOpenWithS4S" class="btn btn-sm" title="用 Sims 4 Studio 打开此 .package 文件">🛠 用 Sims 4 Studio 打开</button>
               </div>
               <h4 style="margin:12px 0 6px">包含资源类型</h4>
               <div id="modDetailResources" class="mod-detail-resources"></div>
