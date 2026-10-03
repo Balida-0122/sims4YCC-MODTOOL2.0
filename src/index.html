@@ -100,7 +100,7 @@
           </li>
         </ul>
         <div class="sidebar-footer">
-          <button id="btnReset" class="btn btn-sm btn-danger">重置所有数据</button>
+          <!-- 重置按钮已迁移到设置页的数据管理中，避免误触 -->
         </div>
       </nav>
 
@@ -410,112 +410,263 @@
         <!-- 设置 -->
         <section class="page" id="page-settings">
           <h2 class="page-title">设置</h2>
+          <div class="settings-layout">
+            <!-- 左侧选项卡 -->
+            <aside class="settings-tabs">
+              <button class="settings-tab active" data-tab="general">通用设置</button>
+              <button class="settings-tab" data-tab="paths">路径设置</button>
+              <button class="settings-tab" data-tab="ai">翻译与 AI</button>
+              <button class="settings-tab" data-tab="categories">分类与标签</button>
+              <button class="settings-tab" data-tab="data">数据管理</button>
+            </aside>
 
-          <div class="settings-section">
-            <h3 class="settings-title">翻译服务</h3>
-            <div class="settings-row">
-              <label class="settings-label">启用翻译引擎</label>
-              <label class="switch-label">
-                <input type="checkbox" id="chkTranslateEnabled" checked>
-                <span>启用后翻译识别页面将自动翻译文件名为中文</span>
-              </label>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">服务商</label>
-              <select id="selTranslateService" class="select-input">
-                <option value="libretranslate">LibreTranslate（免费公共实例）</option>
-                <option value="deepseek">DeepSeek（OpenAI 兼容）</option>
-                <option value="custom">自定义 API 地址</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">API 地址</label>
-              <input type="text" id="txtTranslateApiUrl" class="search-input" placeholder="https://libretranslate.com/translate 或 https://api.deepseek.com" style="flex:1">
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">API Key</label>
-              <input type="text" id="txtTranslateApiKey" class="search-input" placeholder="DeepSeek/OpenAI 需要，LibreTranslate 可留空" style="flex:1">
-            </div>
-            <div class="settings-row" id="modelRow" style="display:none">
-              <label class="settings-label">模型名称</label>
-              <input type="text" id="txtTranslateModel" class="search-input" placeholder="deepseek-chat" style="flex:1">
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">目标语言</label>
-              <select id="selTranslateTargetLang" class="select-input">
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-                <option value="ja">日本語</option>
-                <option value="ko">한국어</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <button id="btnSaveTranslateConfig" class="btn btn-primary">保存翻译配置</button>
-              <button id="btnTestTranslate" class="btn btn-sm">测试翻译</button>
-              <span id="translateTestResult" class="summary-text"></span>
-            </div>
-          </div>
+            <!-- 右侧内容 -->
+            <div class="settings-panels">
+              <!-- 1. 通用设置 -->
+              <div class="settings-panel active" id="panel-general">
+                <div class="settings-section">
+                  <h3 class="settings-title">界面</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">应用主题</label>
+                    <select id="selAppTheme" class="select-input">
+                      <option value="light">浅色主题</option>
+                      <option value="dark">深色主题</option>
+                      <option value="system">跟随系统</option>
+                    </select>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">界面语言</label>
+                    <select id="selAppLanguage" class="select-input">
+                      <option value="zh">简体中文</option>
+                      <option value="en">English</option>
+                    </select>
+                    <span class="settings-hint">切换语言后需重启工具生效</span>
+                  </div>
+                </div>
 
-          <div class="settings-section">
-            <h3 class="settings-title">完整性检测</h3>
-            <div class="settings-row">
-              <label class="settings-label">严格模式</label>
-              <label class="switch-label">
-                <input type="checkbox" id="chkStrictModeSettings">
-                <span>开启后恢复原始严格检测逻辑（默认关闭，使用综合实用型检测减少误报）</span>
-              </label>
-            </div>
-          </div>
+                <div class="settings-section">
+                  <h3 class="settings-title">启动与扫描</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">启动时自动扫描</label>
+                    <label class="switch-label">
+                      <input type="checkbox" id="chkAutoScanOnLaunch">
+                      <span>打开工具后自动对 Mods 文件夹执行一次深度扫描</span>
+                    </label>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">完整性检测严格模式</label>
+                    <label class="switch-label">
+                      <input type="checkbox" id="chkStrictModeSettings">
+                      <span>开启后恢复原始严格检测逻辑（默认关闭，使用综合实用型检测减少误报）</span>
+                    </label>
+                  </div>
+                </div>
 
-          <div class="settings-section">
-            <h3 class="settings-title">冲突删除</h3>
-            <div class="settings-row">
-              <label class="settings-label">冲突删除默认模式</label>
-              <select id="selConflictDeleteMode" class="select-input">
-                <option value="auto">自动智能删除（按规则自动选择，用户二次确认）</option>
-                <option value="manual">手动勾选删除（手动勾选要删除的文件）</option>
-              </select>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label">备份文件夹路径</label>
-              <div style="flex:1;display:flex;gap:8px;align-items:center;">
-                <input type="text" id="txtBackupFolder" class="search-input" placeholder="默认：桌面/Sims4YCC_Backups" style="flex:1" readonly>
-                <button id="btnSelectBackupFolder" class="btn btn-sm">浏览…</button>
-                <button id="btnResetBackupFolder" class="btn btn-sm">恢复默认</button>
+                <div class="settings-section">
+                  <h3 class="settings-title">冲突删除</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">冲突删除默认模式</label>
+                    <select id="selConflictDeleteMode" class="select-input">
+                      <option value="auto">自动智能删除（按规则自动选择，用户二次确认）</option>
+                      <option value="manual">手动勾选删除（手动勾选要删除的文件）</option>
+                    </select>
+                  </div>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">说明</label>
+                    <div class="settings-hint-block">
+                      <strong>自动智能删除规则：</strong><br>
+                      1. 锚定保护优先：冲突组含锚定文件则整组跳过<br>
+                      2. 保留脚本模组：同时有 .ts4script 和 .package 时，保留 .ts4script<br>
+                      3. 保留最新文件：类型相同则保留修改日期较新的<br>
+                      4. 保留较大文件：日期相同则保留文件更大的<br><br>
+                      <strong>删除安全机制：</strong><br>
+                      · 删除前自动备份到自定义文件夹<br>
+                      · 支持"撤销上次删除"一键恢复<br>
+                      · 所有操作记录到 operations.log
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="settings-row" style="align-items:flex-start;">
-              <label class="settings-label">说明</label>
-              <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
-                <strong>自动智能删除规则：</strong><br>
-                1. 锚定保护优先：冲突组含锚定文件则整组跳过<br>
-                2. 保留脚本模组：同时有 .ts4script 和 .package 时，保留 .ts4script<br>
-                3. 保留最新文件：类型相同则保留修改日期较新的<br>
-                4. 保留较大文件：日期相同则保留文件更大的<br><br>
-                <strong>删除安全机制（两种模式共用）：</strong><br>
-                · 删除前自动备份到自定义文件夹（默认：桌面/Sims4YCC_Backups/[时间戳]/）<br>
-                · 支持"撤销上次删除"一键恢复<br>
-                · 所有操作记录到 operations.log
-              </div>
-            </div>
-          </div>
 
-          <div class="settings-section">
-            <h3 class="settings-title">Sims 4 Studio 联动</h3>
-            <div class="settings-row">
-              <label class="settings-label">S4S 安装路径</label>
-              <div style="flex:1;display:flex;gap:8px;align-items:center;">
-                <input type="text" id="txtS4SPath" class="search-input" placeholder="自动探测（Windows: Program Files/Sims 4 Studio; macOS: Applications）" style="flex:1" readonly>
-                <button id="btnSelectS4SPath" class="btn btn-sm">浏览…</button>
-                <button id="btnResetS4SPath" class="btn btn-sm">自动探测</button>
+              <!-- 2. 路径设置 -->
+              <div class="settings-panel" id="panel-paths">
+                <div class="settings-section">
+                  <h3 class="settings-title">Mods 文件夹</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">当前路径</label>
+                    <div style="flex:1;display:flex;gap:8px;align-items:center;">
+                      <input type="text" id="txtSettingsModsFolder" class="search-input" placeholder="未设置" style="flex:1" readonly>
+                      <button id="btnSettingsSelectModsFolder" class="btn btn-sm">浏览…</button>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label"></label>
+                    <span class="settings-hint">修改 Mods 文件夹路径后，建议重新执行一次深度扫描。</span>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <h3 class="settings-title">备份文件夹</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">备份路径</label>
+                    <div style="flex:1;display:flex;gap:8px;align-items:center;">
+                      <input type="text" id="txtBackupFolder" class="search-input" placeholder="默认：桌面/Sims4YCC_Backups" style="flex:1" readonly>
+                      <button id="btnSelectBackupFolder" class="btn btn-sm">浏览…</button>
+                      <button id="btnResetBackupFolder" class="btn btn-sm">恢复默认</button>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label"></label>
+                    <span class="settings-hint">冲突删除、MOD 索引表等都会使用此目录。</span>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <h3 class="settings-title">Sims 4 Studio 联动</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">S4S 安装路径</label>
+                    <div style="flex:1;display:flex;gap:8px;align-items:center;">
+                      <input type="text" id="txtS4SPath" class="search-input" placeholder="自动探测（Windows: Program Files/Sims 4 Studio; macOS: Applications）" style="flex:1" readonly>
+                      <button id="btnSelectS4SPath" class="btn btn-sm">浏览…</button>
+                      <button id="btnResetS4SPath" class="btn btn-sm">自动探测</button>
+                    </div>
+                  </div>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">说明</label>
+                    <div class="settings-hint-block">
+                      · 在 MOD 详情页点击"用 Sims 4 Studio 打开"即可直接唤出 S4S 编辑当前 .package 文件。<br>
+                      · 若自动探测未找到，请手动选择 Sims4Studio.exe（Windows）或 Sims 4 Studio.app（macOS）。<br>
+                      · 仅支持 .package 文件；.disabled 停用文件和 .ts4script 脚本文件无法直接用 S4S 打开。
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="settings-row" style="align-items:flex-start;">
-              <label class="settings-label">说明</label>
-              <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
-                · 在 MOD 详情页点击"用 Sims 4 Studio 打开"即可直接唤出 S4S 编辑当前 .package 文件。<br>
-                · 若自动探测未找到，请手动选择 Sims4Studio.exe（Windows）或 Sims 4 Studio.app（macOS）。<br>
-                · 仅支持 .package 文件；.disabled 停用文件和 .ts4script 脚本文件无法直接用 S4S 打开。
+
+              <!-- 3. 翻译与 AI -->
+              <div class="settings-panel" id="panel-ai">
+                <div class="settings-section">
+                  <h3 class="settings-title">翻译服务</h3>
+                  <div class="settings-row">
+                    <label class="settings-label">启用翻译引擎</label>
+                    <label class="switch-label">
+                      <input type="checkbox" id="chkTranslateEnabled" checked>
+                      <span>启用后翻译识别页面将自动翻译文件名为中文</span>
+                    </label>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">服务商</label>
+                    <select id="selTranslateService" class="select-input">
+                      <option value="libretranslate">LibreTranslate（免费公共实例）</option>
+                      <option value="deepseek">DeepSeek（OpenAI 兼容）</option>
+                      <option value="custom">自定义 API 地址</option>
+                    </select>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">API 地址</label>
+                    <input type="text" id="txtTranslateApiUrl" class="search-input" placeholder="https://libretranslate.com/translate 或 https://api.deepseek.com" style="flex:1">
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">API Key</label>
+                    <input type="text" id="txtTranslateApiKey" class="search-input" placeholder="DeepSeek/OpenAI 需要，LibreTranslate 可留空" style="flex:1">
+                  </div>
+                  <div class="settings-row" id="modelRow" style="display:none">
+                    <label class="settings-label">模型名称</label>
+                    <input type="text" id="txtTranslateModel" class="search-input" placeholder="deepseek-chat" style="flex:1">
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label">目标语言</label>
+                    <select id="selTranslateTargetLang" class="select-input">
+                      <option value="zh">中文</option>
+                      <option value="en">English</option>
+                      <option value="ja">日本語</option>
+                      <option value="ko">한국어</option>
+                    </select>
+                  </div>
+                  <div class="settings-row">
+                    <button id="btnSaveTranslateConfig" class="btn btn-primary">保存翻译配置</button>
+                    <button id="btnTestTranslate" class="btn btn-sm">测试翻译</button>
+                    <span id="translateTestResult" class="summary-text"></span>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <h3 class="settings-title">AI 功能</h3>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">说明</label>
+                    <div class="settings-hint-block">
+                      AI 分析冲突、AI 识别分类、AI 对话助手均复用上方翻译 API 配置（仅支持 DeepSeek / OpenAI 兼容接口）。<br>
+                      配置并保存后，即可在冲突检测页、MOD 详情页和右下角 AI 助手使用。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. 分类与标签 -->
+              <div class="settings-panel" id="panel-categories">
+                <div class="settings-section">
+                  <h3 class="settings-title">分类目录</h3>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">当前分类</label>
+                    <div id="settingsCategoryTree" class="settings-readonly-tree"></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label"></label>
+                    <span class="settings-hint">如需编辑分类层级、重命名或调整顺序，请前往左侧任务栏的"分类与打标签"页面。</span>
+                  </div>
+                </div>
+
+                <div class="settings-section">
+                  <h3 class="settings-title">标签列表</h3>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">已有标签</label>
+                    <div id="settingsTagList" class="settings-tag-list"></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-label"></label>
+                    <span class="settings-hint">新增、重命名、删除标签及绑定分类，请在"分类与打标签"页面操作。</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. 数据管理 -->
+              <div class="settings-panel" id="panel-data">
+                <div class="settings-section">
+                  <h3 class="settings-title">导入 / 导出配置</h3>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">导出配置</label>
+                    <div>
+                      <button id="btnExportConfig" class="btn btn-primary">导出配置到文件</button>
+                      <p class="settings-hint">将 Mods 路径、备份路径、API 配置、分类树、标签等导出为 JSON，方便换机或备份。</p>
+                    </div>
+                  </div>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">导入配置</label>
+                    <div>
+                      <button id="btnImportConfig" class="btn btn-primary">从文件导入配置</button>
+                      <p class="settings-hint">导入配置会合并到当前配置中。扫描结果不会被覆盖。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="settings-section settings-danger-zone">
+                  <h3 class="settings-title">重置</h3>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">重置扫描数据</label>
+                    <div>
+                      <button id="btnResetScanData" class="btn btn-warning">重置扫描数据</button>
+                      <p class="settings-hint">只清空扫描结果、锚定记录、保留列表、分类记录、损坏检测记录和操作日志。</p>
+                      <p class="settings-hint">保留：Mods 路径、备份路径、API 配置、分类树、标签、严格模式、冲突删除模式。</p>
+                    </div>
+                  </div>
+                  <div class="settings-row" style="align-items:flex-start;">
+                    <label class="settings-label">恢复默认设置</label>
+                    <div>
+                      <button id="btnResetAllSettings" class="btn btn-danger">恢复默认设置</button>
+                      <p class="settings-hint">清空所有数据并恢复到初始状态，包括 Mods 路径、API Key、分类、标签等。</p>
+                      <p class="settings-hint"><strong>此操作不可撤销，请谨慎使用。</strong></p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

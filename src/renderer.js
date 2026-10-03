@@ -181,6 +181,22 @@ async function init() {
     console.error('获取版本号失败:', e);
   }
 
+  // 加载通用设置（主题、语言、启动时自动扫描）
+  try {
+    const general = await api.getGeneralSettings();
+    applyTheme(general.theme || 'light');
+    if (general.language) document.documentElement.lang = general.language === 'zh' ? 'zh-CN' : 'en';
+    if (general.autoScanOnLaunch && appState.modsFolder) {
+      // 延迟一点执行，让界面先渲染完成
+      setTimeout(() => {
+        toast('正在执行启动时自动扫描…', 'info');
+        runDeepScan().catch(e => console.error('启动自动扫描失败:', e));
+      }, 600);
+    }
+  } catch (e) {
+    console.error('加载通用设置失败:', e);
+  }
+
   renderOverview();
 }
 
@@ -310,12 +326,6 @@ function bindTopbar() {
       }
     });
   }
-
-  $('#btnReset').addEventListener('click', async () => {
-    if (!confirm('确定重置所有数据？这将清除扫描结果、锚定、分类等所有记录（不会删除文件）。')) return;
-    await api.resetState();
-    location.reload();
-  });
 
   $('#btnStartScan').addEventListener('click', () => switchStep('scan'));
 }
@@ -2002,35 +2012,125 @@ function bindClassifyPage() {
 }
 
 // ============ 设置页面 ============
+function applyTheme(theme) {
+  if (!theme || theme === 'system') {
+    // 简单处理：系统偏好
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.body.classList.toggle('theme-dark', prefersDark);
+    return;
+  }
+  document.body.classList.toggle('theme-dark', theme === 'dark');
+}
+
+function renderSettingsCategoryTree(categories, container, level = 0) {
+  if (!container) return;
+  if (!categories || categories.length === 0) {
+    container.innerHTML = '<span class="settings-hint">暂无分类</span>';
+    return;
+  }
+  const ul = document.createElement('ul');
+  ul.className = 'settings-tree-list';
+  ul.style.paddingLeft = level ? '16px' : '0';
+  for (const c of categories) {
+    const li = document.createElement('li');
+    li.textContent = c.name;
+    ul.appendChild(li);
+    if (Array.isArray(c.children) && c.children.length > 0) {
+      renderSettingsCategoryTree(c.children, li, level + 1);
+    }
+  }
+  container.appendChild(ul);
+}
+
+function renderSettingsTagList(tags, container) {
+  if (!container) return;
+  container.innerHTML = '';
+  if (!tags || tags.length === 0) {
+    container.innerHTML = '<span class="settings-hint">暂无标签</span>';
+    return;
+  }
+  for (const t of tags) {
+    const name = typeof t === 'string' ? t : (t.name || '');
+    const category = (typeof t === 'object' && t.category) ? t.category.join(' > ') : '';
+    const span = document.createElement('span');
+    span.className = 'settings-tag-chip';
+    span.title = category ? `绑定分类：${category}` : '未绑定分类';
+    span.innerHTML = esc(name) + (category ? ` <small style="opacity:.7">→ ${esc(category)}</small>` : '');
+    container.appendChild(span);
+  }
+}
+
 function bindSettingsPage() {
   console.log('[bindSettingsPage] 开始绑定设置页事件');
+
+  // Tab 切换
+  $$('.settings-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      $$('.settings-tab').forEach(t => t.classList.remove('active'));
+      $$('.settings-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      const panel = $(`#panel-${target}`);
+      if (panel) panel.classList.add('active');
+    });
+  });
+
+  // 翻译配置
   const btnSave = $('#btnSaveTranslateConfig');
   const btnTest = $('#btnTestTranslate');
-  console.log('[bindSettingsPage] 保存按钮:', btnSave, '测试按钮:', btnTest);
   if (btnSave) btnSave.addEventListener('click', saveTranslateConfig);
   if (btnTest) {
     btnTest.addEventListener('click', () => {
       console.log('[testTranslate] 按钮点击事件已触发');
       testTranslate();
     });
-  } else {
-    console.error('[bindSettingsPage] #btnTestTranslate 未找到！');
   }
-  $('#selTranslateService').addEventListener('change', (e) => {
-    const svc = e.target.value;
-    const modelRow = $('#modelRow');
-    if (svc === 'libretranslate') {
-      $('#txtTranslateApiUrl').value = 'https://libretranslate.com/translate';
-      if (modelRow) modelRow.style.display = 'none';
-    } else if (svc === 'deepseek') {
-      $('#txtTranslateApiUrl').value = 'https://api.deepseek.com';
-      if (modelRow) modelRow.style.display = '';
-      const mdl = $('#txtTranslateModel');
-      if (mdl && !mdl.value) mdl.value = 'deepseek-chat';
-    } else {
-      if (modelRow) modelRow.style.display = '';
-    }
-  });
+  const selTranslateService = $('#selTranslateService');
+  if (selTranslateService) {
+    selTranslateService.addEventListener('change', (e) => {
+      const svc = e.target.value;
+      const modelRow = $('#modelRow');
+      if (svc === 'libretranslate') {
+        $('#txtTranslateApiUrl').value = 'https://libretranslate.com/translate';
+        if (modelRow) modelRow.style.display = 'none';
+      } else if (svc === 'deepseek') {
+        $('#txtTranslateApiUrl').value = 'https://api.deepseek.com';
+        if (modelRow) modelRow.style.display = '';
+        const mdl = $('#txtTranslateModel');
+        if (mdl && !mdl.value) mdl.value = 'deepseek-chat';
+      } else {
+        if (modelRow) modelRow.style.display = '';
+      }
+    });
+  }
+
+  // 通用设置：主题
+  const selAppTheme = $('#selAppTheme');
+  if (selAppTheme) {
+    selAppTheme.addEventListener('change', async () => {
+      const theme = selAppTheme.value;
+      applyTheme(theme);
+      await api.setGeneralSettings({ theme });
+      toast('主题已保存', 'success');
+    });
+  }
+  // 通用设置：语言
+  const selAppLanguage = $('#selAppLanguage');
+  if (selAppLanguage) {
+    selAppLanguage.addEventListener('change', async () => {
+      await api.setGeneralSettings({ language: selAppLanguage.value });
+      toast('语言设置已保存，重启后生效', 'success');
+    });
+  }
+  // 通用设置：启动时自动扫描
+  const chkAutoScan = $('#chkAutoScanOnLaunch');
+  if (chkAutoScan) {
+    chkAutoScan.addEventListener('change', async () => {
+      await api.setGeneralSettings({ autoScanOnLaunch: chkAutoScan.checked });
+      toast(chkAutoScan.checked ? '已开启启动时自动扫描' : '已关闭启动时自动扫描', 'success');
+    });
+  }
+
   // 严格模式同步
   const chkStrictSettings = $('#chkStrictModeSettings');
   if (chkStrictSettings) {
@@ -2051,6 +2151,22 @@ function bindSettingsPage() {
       toast('冲突删除默认模式已保存：' + (v === 'auto' ? '自动智能删除' : '手动勾选删除'), 'success');
     });
   }
+
+  // Mods 文件夹路径设置
+  const btnSettingsSelectMods = $('#btnSettingsSelectModsFolder');
+  const txtSettingsMods = $('#txtSettingsModsFolder');
+  if (btnSettingsSelectMods) {
+    btnSettingsSelectMods.addEventListener('click', async () => {
+      const r = await api.selectFolder();
+      if (r && !r.canceled && r.path) {
+        if (txtSettingsMods) txtSettingsMods.value = r.path;
+        appState.modsFolder = r.path;
+        $('#modsPathDisplay').textContent = r.path;
+        toast('Mods 文件夹已设置为：' + r.path, 'success');
+      }
+    });
+  }
+
   // 备份路径设置
   const btnSelectBackup = $('#btnSelectBackupFolder');
   const btnResetBackup = $('#btnResetBackupFolder');
@@ -2072,6 +2188,7 @@ function bindSettingsPage() {
       }
     });
   }
+
   // S4S 安装路径设置
   const btnSelectS4S = $('#btnSelectS4SPath');
   const btnResetS4S = $('#btnResetS4SPath');
@@ -2094,11 +2211,115 @@ function bindSettingsPage() {
       }
     });
   }
+
+  // 导入 / 导出配置
+  const btnExportConfig = $('#btnExportConfig');
+  if (btnExportConfig) {
+    btnExportConfig.addEventListener('click', async () => {
+      const r = await api.exportConfig();
+      if (r && r.canceled) return;
+      if (r && r.ok) toast('配置已导出：' + r.path, 'success');
+      else toast('导出失败：' + (r && r.error ? r.error : '未知错误'), 'error');
+    });
+  }
+  const btnImportConfig = $('#btnImportConfig');
+  if (btnImportConfig) {
+    btnImportConfig.addEventListener('click', async () => {
+      const r = await api.importConfig();
+      if (r && r.canceled) return;
+      if (r && r.ok) {
+        toast('配置已导入，页面将刷新', 'success');
+        setTimeout(() => location.reload(), 800);
+      } else {
+        toast('导入失败：' + (r && r.error ? r.error : '未知错误'), 'error');
+      }
+    });
+  }
+
+  // 重置扫描数据
+  const btnResetScanData = $('#btnResetScanData');
+  if (btnResetScanData) {
+    btnResetScanData.addEventListener('click', async () => {
+      const msg = [
+        '确定要重置扫描数据吗？',
+        '',
+        '将清除以下内容：',
+        '· 深度扫描结果',
+        '· 锚定保护记录',
+        '· 重复文件保留列表',
+        '· 冲突白名单',
+        '· 文件分类记录',
+        '· 损坏检测结果',
+        '· 操作日志',
+        '',
+        '保留内容：Mods 路径、备份路径、API 配置、分类树、标签、严格模式、冲突删除模式。',
+        '',
+        '此操作不会删除任何实际文件。'
+      ].join('\n');
+      if (!confirm(msg)) return;
+      const r = await api.resetScanData();
+      if (r && r.ok) {
+        toast('扫描数据已重置', 'success');
+        location.reload();
+      } else {
+        toast('重置失败', 'error');
+      }
+    });
+  }
+
+  // 恢复默认设置
+  const btnResetAll = $('#btnResetAllSettings');
+  if (btnResetAll) {
+    btnResetAll.addEventListener('click', async () => {
+      const msg = [
+        '⚠️ 确定要恢复默认设置吗？',
+        '',
+        '将清除所有数据并恢复到初始状态，包括：',
+        '· Mods 文件夹路径',
+        '· 备份文件夹路径',
+        '· API 地址、API Key、模型等翻译/AI 配置',
+        '· 分类树（恢复默认）',
+        '· 手动标签',
+        '· 扫描结果、锚定、保留列表、白名单、分类记录',
+        '· 严格模式、冲突删除模式等开关',
+        '· 操作日志',
+        '',
+        '此操作不可撤销，但也不会删除你的 MOD 文件本身。',
+        '',
+        '请再次确认是否继续？'
+      ].join('\n');
+      if (!confirm(msg)) return;
+      if (!confirm('二次确认：你真的要清空所有设置吗？')) return;
+      const r = await api.resetAllSettings();
+      if (r && r.ok) {
+        toast('已恢复默认设置', 'success');
+        location.reload();
+      } else {
+        toast('恢复失败', 'error');
+      }
+    });
+  }
+
   console.log('[bindSettingsPage] 绑定完成');
 }
 
 async function loadSettingsPage() {
   try {
+    // 通用设置
+    try {
+      const general = await api.getGeneralSettings();
+      const selTheme = $('#selAppTheme');
+      if (selTheme) selTheme.value = general.theme || 'light';
+      applyTheme(general.theme || 'light');
+      const selLang = $('#selAppLanguage');
+      if (selLang) selLang.value = general.language || 'zh';
+      const chkAutoScan = $('#chkAutoScanOnLaunch');
+      if (chkAutoScan) chkAutoScan.checked = !!general.autoScanOnLaunch;
+    } catch (e) {
+      console.error('加载通用设置失败:', e);
+    }
+
+    // 翻译配置
     const config = await api.getTranslationConfig();
     $('#chkTranslateEnabled').checked = config.enabled !== false;
     $('#selTranslateService').value = config.service || 'libretranslate';
@@ -2106,33 +2327,45 @@ async function loadSettingsPage() {
     $('#txtTranslateApiKey').value = config.apiKey || '';
     $('#txtTranslateModel').value = config.model || '';
     $('#selTranslateTargetLang').value = config.targetLang || 'zh';
-    // 根据服务商显示/隐藏模型字段
     const svc = config.service || 'libretranslate';
     const modelRow = $('#modelRow');
     if (modelRow) modelRow.style.display = (svc === 'deepseek' || svc === 'custom') ? '' : 'none';
-    // 同步严格模式 + 冲突删除默认模式
+
+    // 状态相关设置
     const st = await api.getState();
     const chkStrictSettings = $('#chkStrictModeSettings');
     if (chkStrictSettings) chkStrictSettings.checked = !!st.strictMode;
     const selDelMode = $('#selConflictDeleteMode');
     if (selDelMode) {
-      // 优先从 getConflictDeleteMode 获取（权威来源）
       let m = 'auto';
       try { const r = await api.getConflictDeleteMode(); if (r && r.mode) m = r.mode; } catch (e) {}
       selDelMode.value = (m === 'manual') ? 'manual' : 'auto';
     }
-    // 加载备份路径
+
+    // 路径设置
+    const txtSettingsMods = $('#txtSettingsModsFolder');
+    if (txtSettingsMods) txtSettingsMods.value = st.modsFolder || '';
     const txtBackup = $('#txtBackupFolder');
     if (txtBackup) {
       try { txtBackup.value = await api.getBackupFolder(); } catch (e) {}
     }
-    // 加载 S4S 路径
     const txtS4S = $('#txtS4SPath');
     if (txtS4S) {
       try {
         const s = await api.getS4SPath();
         txtS4S.value = s.custom || s.detected || '';
       } catch (e) {}
+    }
+
+    // 分类与标签预览
+    const treeContainer = $('#settingsCategoryTree');
+    if (treeContainer) {
+      treeContainer.innerHTML = '';
+      renderSettingsCategoryTree(st.categories, treeContainer);
+    }
+    const tagContainer = $('#settingsTagList');
+    if (tagContainer) {
+      renderSettingsTagList(st.tags || [], tagContainer);
     }
   } catch (e) {
     console.error('加载设置失败:', e);

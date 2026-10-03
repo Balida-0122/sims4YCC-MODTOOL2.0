@@ -4,7 +4,12 @@ contextBridge.exposeInMainWorld('api', {
   // 文件夹选择与状态
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getState: () => ipcRenderer.invoke('get-state'),
-  resetState: () => ipcRenderer.invoke('reset-state'),
+
+  // 数据管理（重置扫描数据 / 恢复默认设置 / 导入导出配置）
+  resetScanData: () => ipcRenderer.invoke('reset-scan-data'),
+  resetAllSettings: () => ipcRenderer.invoke('reset-all-settings'),
+  exportConfig: () => ipcRenderer.invoke('export-config'),
+  importConfig: () => ipcRenderer.invoke('import-config'),
 
   // 深度扫描（支持完整性检测选项，以及进度事件）
   deepScan: (opts) => ipcRenderer.invoke('deep-scan', opts),
@@ -89,6 +94,10 @@ contextBridge.exposeInMainWorld('api', {
   getBackupFolder: () => ipcRenderer.invoke('get-backup-folder'),
   setBackupFolder: (folder) => ipcRenderer.invoke('set-backup-folder', folder),
   resetBackupFolder: () => ipcRenderer.invoke('reset-backup-folder'),
+
+  // 通用设置（主题 / 语言 / 启动时自动扫描）
+  getGeneralSettings: () => ipcRenderer.invoke('get-general-settings'),
+  setGeneralSettings: (opts) => ipcRenderer.invoke('set-general-settings', opts),
 
   // 应用版本号
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),

@@ -1543,6 +1543,23 @@ ipcMain.handle('reset-backup-folder', async () => {
   return { ok: true, folder: getDefaultBackupRoot() };
 });
 
+// ============ IPC: 通用设置 ============
+ipcMain.handle('get-general-settings', async () => {
+  return {
+    theme: state.settings && state.settings.theme ? state.settings.theme : 'light',
+    language: state.settings && state.settings.language ? state.settings.language : 'zh',
+    autoScanOnLaunch: !!(state.settings && state.settings.autoScanOnLaunch),
+  };
+});
+ipcMain.handle('set-general-settings', async (event, opts) => {
+  state.settings = state.settings || {};
+  if (opts.theme) state.settings.theme = opts.theme;
+  if (opts.language) state.settings.language = opts.language;
+  if (typeof opts.autoScanOnLaunch === 'boolean') state.settings.autoScanOnLaunch = opts.autoScanOnLaunch;
+  saveState();
+  return { ok: true, settings: state.settings };
+});
+
 // ============ IPC: 删除冲突文件（单删也走备份） ============
 ipcMain.handle('delete-conflict-file', async (event, filePath) => {
   if (!filePath) return { error: '路径为空' };
@@ -3343,8 +3360,12 @@ ipcMain.handle('set-classification', async (event, modPath, classification) => {
   };
 });
 
-// ============ IPC: 重置 ============
-ipcMain.handle('reset-state', async () => {
+// ============ IPC: 重置与数据管理 ============
+
+/**
+ * 恢复出厂默认设置：清空所有数据与配置。
+ */
+ipcMain.handle('reset-all-settings', async () => {
   state = {
     modsFolder: '',
     scanResults: null,
@@ -3354,7 +3375,112 @@ ipcMain.handle('reset-state', async () => {
     classifications: {},
     tags: [],
     categories: defaultCategories(),
+    damagedFiles: [],
+    strictMode: false,
+    conflictDeleteMode: 'auto',
+    lastDeleteBackupKey: null,
+    settings: {},
+    translationConfig: {
+      service: 'libretranslate',
+      apiUrl: 'https://libretranslate.com/translate',
+      apiKey: '',
+      model: '',
+      targetLang: 'zh',
+      enabled: true,
+    },
   };
   saveState();
+  // 同时清空操作日志
+  try {
+    if (fs.existsSync(OPER_LOG)) fs.writeFileSync(OPER_LOG, '', 'utf-8');
+  } catch (e) {
+    console.error('清空操作日志失败:', e);
+  }
+  opLog('RESET_ALL_SETTINGS', '用户恢复默认设置');
   return { ok: true };
+});
+
+/**
+ * 重置扫描数据：只清空扫描结果、临时索引与操作日志，保留用户配置（路径、API、标签、分类等）。
+ */
+ipcMain.handle('reset-scan-data', async () => {
+  state.scanResults = null;
+  state.anchored = [];
+  state.keepList = [];
+  state.whitelist = [];
+  state.classifications = {};
+  state.damagedFiles = [];
+  state.lastDeleteBackupKey = null;
+  saveState();
+  // 清空操作日志
+  try {
+    if (fs.existsSync(OPER_LOG)) fs.writeFileSync(OPER_LOG, '', 'utf-8');
+  } catch (e) {
+    console.error('清空操作日志失败:', e);
+  }
+  opLog('RESET_SCAN_DATA', '用户重置扫描数据');
+  return { ok: true };
+});
+
+/**
+ * 导出配置到 JSON 文件。
+ */
+ipcMain.handle('export-config', async () => {
+  try {
+    const savePath = await dialog.showSaveDialog(mainWindow, {
+      title: '导出 Sims4YCC 配置',
+      defaultPath: path.join(os.homedir(), 'Desktop', `Sims4YCC_Config_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.json`),
+      filters: [{ name: 'JSON 配置', extensions: ['json'] }],
+    });
+    if (savePath.canceled || !savePath.filePath) return { canceled: true };
+    // 导出完整 state，但移除运行时大对象缓存（如图片 base64）
+    const exportData = { ...state };
+    if (exportData.scanResults) {
+      delete exportData.scanResults.folderImages;
+    }
+    fs.writeFileSync(savePath.filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+    opLog('EXPORT_CONFIG', `导出配置到 ${savePath.filePath}`);
+    return { ok: true, path: savePath.filePath };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+/**
+ * 从 JSON 文件导入配置。
+ */
+ipcMain.handle('import-config', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入 Sims4YCC 配置',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON 配置', extensions: ['json'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+    const raw = fs.readFileSync(result.filePaths[0], 'utf-8');
+    const imported = JSON.parse(raw);
+    // 必须字段校验：至少包含 categories 或 settings/translationConfig
+    if (typeof imported !== 'object' || imported === null) {
+      return { ok: false, error: '配置文件格式不正确' };
+    }
+    // 合并导入，保留当前扫描结果避免意外覆盖
+    const nextState = { ...state };
+    if (imported.modsFolder !== undefined) nextState.modsFolder = imported.modsFolder;
+    if (imported.settings) nextState.settings = { ...nextState.settings, ...imported.settings };
+    if (imported.translationConfig) nextState.translationConfig = { ...nextState.translationConfig, ...imported.translationConfig };
+    if (Array.isArray(imported.categories) && imported.categories.length > 0) nextState.categories = imported.categories;
+    if (Array.isArray(imported.tags)) nextState.tags = imported.tags.map(t => typeof t === 'string' ? { name: t, source: 'manual', category: null } : { ...t }).filter(t => t.name);
+    if (Array.isArray(imported.anchored)) nextState.anchored = imported.anchored;
+    if (imported.classifications) nextState.classifications = imported.classifications;
+    if (imported.strictMode !== undefined) nextState.strictMode = imported.strictMode;
+    if (imported.conflictDeleteMode) nextState.conflictDeleteMode = imported.conflictDeleteMode;
+    state = nextState;
+    saveState();
+    // 修复标签绑定
+    syncTagBindingsWithTree([], [], state.categories || defaultCategories());
+    opLog('IMPORT_CONFIG', `从 ${result.filePaths[0]} 导入配置`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
