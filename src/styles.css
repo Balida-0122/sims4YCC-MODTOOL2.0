@@ -305,11 +305,16 @@ body {
 }
 .folder-icon { font-size: 16px; }
 .folder-name, .file-name {
-  flex: 1;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    flex: 1;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal; /* 允许换行 */
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* 最多显示2行 */
+    -webkit-box-orient: vertical;
+    word-break: break-all; /* 长文件名强制换行 */
+    line-height: 1.3;
 }
 .folder-path, .file-path {
   font-size: 11px;
@@ -2111,18 +2116,25 @@ option.tag-user {
 .move-file-list[data-view="grid"] .file-thumb {
   width: 100%;
   aspect-ratio: 1;
+  min-height: 80px;
   background: var(--bg-tertiary);
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  font-size: 36px;
   margin-bottom: 8px;
 }
 .file-list[data-view="grid"] .file-thumb img,
 .move-file-list[data-view="grid"] .file-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .file-list[data-view="grid"] .file-info,
-.move-file-list[data-view="grid"] .file-info { flex: 1; min-width: 0; }
+.move-file-list[data-view="grid"] .file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 .file-list[data-view="grid"] .file-name,
 .move-file-list[data-view="grid"] .file-name {
   font-size: 13px;
@@ -2130,15 +2142,28 @@ option.tag-user {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .file-list[data-view="grid"] .file-meta,
-.move-file-list[data-view="grid"] .file-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.move-file-list[data-view="grid"] .file-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .file-list[data-view="grid"] .file-actions,
 .move-file-list[data-view="grid"] .file-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 8px;
+  margin-top: auto;
+  padding-top: 8px;
   gap: 6px;
 }
 
@@ -2315,3 +2340,21 @@ body.theme-dark .toggle-switch-track { background: #4b5563; }
 body.theme-dark .btn-s4s { background: rgba(14,165,233,0.12); border-color: rgba(14,165,233,0.35); color: #7dd3fc; }
 body.theme-dark .btn-s4s:hover { background: rgba(14,165,233,0.22); }
 body.theme-dark .toolbar-more-menu { background: var(--bg-secondary); border-color: var(--border); }
+
+/* 强制修复所有网格视图下的文件名换行问题 */
+.file-item,
+.file-info,
+.file-name {
+    min-width: 0 !important;
+}
+
+.file-name {
+    white-space: normal !important;
+    word-break: break-all !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;   /* 最多显示2行 */
+    -webkit-box-orient: vertical !important;
+    line-height: 1.3 !important;
+}
