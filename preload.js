@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // 创建并移动
   executeMove: () => ipcRenderer.invoke('execute-move'),
+  exportModIndex: (opts) => ipcRenderer.invoke('export-mod-index', opts),
 
   // 图片预览
   getImages: (folderPath) => ipcRenderer.invoke('get-images', folderPath),
@@ -82,6 +83,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // 严格模式开关
   setStrictMode: (enabled) => ipcRenderer.invoke('set-strict-mode', enabled),
+
+  // 备份路径设置
+  selectBackupFolder: () => ipcRenderer.invoke('select-backup-folder'),
+  getBackupFolder: () => ipcRenderer.invoke('get-backup-folder'),
+  setBackupFolder: (folder) => ipcRenderer.invoke('set-backup-folder', folder),
+  resetBackupFolder: () => ipcRenderer.invoke('reset-backup-folder'),
 
   // 翻译配置
   getTranslationConfig: () => ipcRenderer.invoke('get-translation-config'),

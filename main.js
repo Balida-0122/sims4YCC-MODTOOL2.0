@@ -116,6 +116,9 @@ let state = {
   strictMode: false,        // 完整性检测严格模式（默认关闭，使用综合实用型检测）
   conflictDeleteMode: 'auto', // 冲突删除默认模式: auto | manual
   lastDeleteBackupKey: null,// 最近一次删除备份目录 key（用于撤销）
+  settings: {               // 用户设置
+    backupFolder: '',       // 自定义备份路径，空则默认桌面/Sims4YCC_Backups
+  },
   translationConfig: {      // 翻译服务配置
     service: 'libretranslate',        // 服务商：libretranslate | deepseek | custom
     apiUrl: 'https://libretranslate.com/translate', // API 地址
@@ -171,6 +174,8 @@ function loadState() {
       } else {
         state.tags = [];
       }
+      // 修复历史数据中已失联的标签绑定分类（分类树被修改/删除后遗留的旧绑定）
+      syncTagBindingsWithTree([], [], state.categories || defaultCategories());
     }
   } catch (e) {
     console.error('加载状态失败:', e);
@@ -600,6 +605,20 @@ ipcMain.handle('select-folder', async () => {
   return { canceled: false, path: state.modsFolder };
 });
 
+ipcMain.handle('select-backup-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: '选择 Sims4YCC 备份文件夹',
+    defaultPath: state.settings && state.settings.backupFolder ? state.settings.backupFolder : getDefaultBackupRoot(),
+  });
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+  const folder = result.filePaths[0];
+  state.settings = state.settings || {};
+  state.settings.backupFolder = folder;
+  saveState();
+  return { canceled: false, path: folder };
+});
+
 ipcMain.handle('get-state', async () => {
   return { ...state };
 });
@@ -829,6 +848,8 @@ ipcMain.handle('deep-scan', async (event, opts) => {
   const prunedTotal = pruneScan.classifications + pruneScan.anchored + pruneScan.keepList;
   opLog('DEEP_SCAN', `扫描根目录 ${root}，共 ${allFiles.length} 个文件（已停用 ${state.scanResults.stats.disabledCount} 个），严重损坏 ${state.scanResults.stats.damagedCount} 个，警告 ${state.scanResults.stats.warningCount} 个，非标准 ${state.scanResults.stats.nonstandardCount} 个，自动分类 ${state.scanResults.autoClassifiedCount} 个${prunedTotal > 0 ? `，清理已删除记录 ${prunedTotal} 条（日志 ${pruneScan.logLines} 行）` : ''}`);
   saveState();
+  // 自动生成 MOD 索引表（CSV + HTML）到备份根目录
+  await autoExportModIndex('深度扫描');
   return state.scanResults;
 });
 
@@ -1124,15 +1145,26 @@ ipcMain.handle('scan-conflicts', async () => {
 
 // ============ 冲突删除：工具函数 ============
 /**
- * 返回备份目录：<modsRoot>/_deleted_backup/<YYYYMMDD_HHmmss>/
- *   内部按相对路径保持文件夹结构
+ * 返回默认备份根目录：桌面/Sims4YCC_Backups/
+ */
+function getDefaultBackupRoot() {
+  return path.join(require('os').homedir(), 'Desktop', 'Sims4YCC_Backups');
+}
+
+/**
+ * 返回备份目录：<backupRoot>/<YYYYMMDD_HHmmss>/
+ *   内部按相对路径保持 Mods 原结构
+ *   如果用户设置了 settings.backupFolder，优先使用；否则默认桌面/Sims4YCC_Backups
  */
 function getBackupDir(modsRoot) {
   if (!modsRoot) return null;
+  const root = state.settings && state.settings.backupFolder && String(state.settings.backupFolder).trim()
+    ? String(state.settings.backupFolder).trim()
+    : getDefaultBackupRoot();
   const ts = new Date();
   const pad = n => String(n).padStart(2, '0');
   const dirName = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
-  return path.join(modsRoot, '_deleted_backup', dirName);
+  return path.join(root, dirName);
 }
 
 /**
@@ -1263,7 +1295,7 @@ function deleteWithBackupSync(opts) {
   // 4. 备份 + 记录
   const backupDir = getBackupDir(modsRoot);
   if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-  const backupKey = path.relative(modsRoot, backupDir); // 相对 key，撤销时用
+  const backupKey = backupDir; // 备份目录绝对路径，撤销时直接使用（兼容旧版相对 key）
   const manifest = [];
   const results = [];
 
@@ -1346,7 +1378,10 @@ function deleteWithBackupSync(opts) {
 function undoLastDeleteSync() {
   if (!state.modsFolder) return { ok: false, error: '未设置 Mods 文件夹' };
   if (!state.lastDeleteBackupKey) return { ok: false, error: '没有可撤销的删除操作' };
-  const backupDir = path.join(state.modsFolder, state.lastDeleteBackupKey);
+  // 兼容旧版：老 key 是相对路径（如 _deleted_backup/...），新版是绝对路径
+  const backupDir = path.isAbsolute(state.lastDeleteBackupKey)
+    ? state.lastDeleteBackupKey
+    : path.join(state.modsFolder, state.lastDeleteBackupKey);
   if (!fs.existsSync(backupDir)) return { ok: false, error: '备份目录不存在' };
   const manifestPath = path.join(backupDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return { ok: false, error: 'manifest 不存在' };
@@ -1481,6 +1516,32 @@ ipcMain.handle('set-conflict-delete-mode', async (event, mode) => {
   return { ok: true, mode: v };
 });
 
+// ============ IPC: 备份路径设置 ============
+ipcMain.handle('get-backup-folder', async () => {
+  return state.settings && state.settings.backupFolder
+    ? state.settings.backupFolder
+    : getDefaultBackupRoot();
+});
+ipcMain.handle('set-backup-folder', async (event, folder) => {
+  const v = String(folder || '').trim();
+  if (!v) return { ok: false, error: '路径不能为空' };
+  try {
+    if (!fs.existsSync(v)) fs.mkdirSync(v, { recursive: true });
+  } catch (e) {
+    return { ok: false, error: '无法创建该目录：' + e.message };
+  }
+  state.settings = state.settings || {};
+  state.settings.backupFolder = v;
+  saveState();
+  return { ok: true, folder: v };
+});
+ipcMain.handle('reset-backup-folder', async () => {
+  state.settings = state.settings || {};
+  state.settings.backupFolder = '';
+  saveState();
+  return { ok: true, folder: getDefaultBackupRoot() };
+});
+
 // ============ IPC: 删除冲突文件（单删也走备份） ============
 ipcMain.handle('delete-conflict-file', async (event, filePath) => {
   if (!filePath) return { error: '路径为空' };
@@ -1556,6 +1617,143 @@ function fmtSize(bytes) {
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / 1048576).toFixed(2) + ' MB';
 }
+
+// ============ MOD 索引表导出 ============
+function getBackupRoot() {
+  return (state.settings && state.settings.backupFolder && String(state.settings.backupFolder).trim())
+    ? String(state.settings.backupFolder).trim()
+    : getDefaultBackupRoot();
+}
+
+function extractVersion(fileName) {
+  if (!fileName) return '';
+  const base = path.basename(fileName, path.extname(fileName));
+  // 匹配 v1.2.3 / v1.2 / version 1.2.3 / [v1.2] / (1.2) 等
+  const m = base.match(/(?:version|v|ver)?\s*[:\-\[\(]?\s*(\d+\.\d+(?:\.\d+)?(?:[a-z]?\d*))\s*[\]\)]?/i);
+  return m ? m[1] : '';
+}
+
+function buildModIndexRows() {
+  if (!state.scanResults || !Array.isArray(state.scanResults.files)) return [];
+  const rows = [];
+  for (const f of state.scanResults.files) {
+    if (f.modExt !== '.package' && f.modExt !== '.ts4script') continue;
+    const cls = state.classifications[f.path] || {};
+    const category = (Array.isArray(cls.category) && cls.category.length > 0)
+      ? cls.category.join('/')
+      : '未识别';
+    rows.push({
+      fileName: f.name || '',
+      chineseName: f.chineseName || '',
+      fullPath: f.path || '',
+      category,
+      version: extractVersion(f.name),
+      disabled: f.disabled ? '是' : '否',
+      author: f.author || '未知',
+    });
+  }
+  return rows;
+}
+
+function csvEscape(val) {
+  const s = String(val == null ? '' : val).replace(/\r/g, '');
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+async function writeModIndexCsv(rows, filePath) {
+  const headers = ['MOD文件名', '中文译名', '完整路径', '所在分类文件夹', '版本号', '是否已停用', '来源作者'];
+  const lines = [headers.map(csvEscape).join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.fileName, r.chineseName, r.fullPath, r.category,
+      r.version, r.disabled, r.author,
+    ].map(csvEscape).join(','));
+  }
+  await fsp.writeFile(filePath, '\uFEFF' + lines.join('\n'), 'utf-8');
+}
+
+async function writeModIndexHtml(rows, filePath) {
+  const title = 'Sims4YCC MOD 索引表';
+  const ths = ['MOD文件名', '中文译名', '完整路径', '所在分类文件夹', '版本号', '是否已停用', '来源作者'];
+  let html = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>${title}</title>`;
+  html += `<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#1a1a2e;padding:20px;font-size:14px}`;
+  html += `h1{font-size:20px;margin-bottom:8px}.meta{color:#6b7280;font-size:12px;margin-bottom:16px}`;
+  html += `table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:13px}`;
+  html += `th,td{padding:8px 10px;border:1px solid #e5e7eb;text-align:left;vertical-align:top}`;
+  html += `th{background:#f0f2f7;font-weight:600}.disabled{color:#dc2626}.nowrap{white-space:nowrap}`;
+  html += `tr:nth-child(even){background:#fafafa}</style></head><body>`;
+  html += `<h1>${title}</h1>`;
+  html += `<div class="meta">生成时间：${new Date().toLocaleString('zh-CN')} | Mods 目录：${escHtml(state.modsFolder || '')} | 共 ${rows.length} 个 MOD</div>`;
+  html += '<table><thead><tr>' + ths.map(h => `<th>${escHtml(h)}</th>`).join('') + '</tr></thead><tbody>';
+  for (const r of rows) {
+    html += '<tr>';
+    html += `<td>${escHtml(r.fileName)}</td>`;
+    html += `<td>${escHtml(r.chineseName)}</td>`;
+    html += `<td style="word-break:break-all">${escHtml(r.fullPath)}</td>`;
+    html += `<td class="nowrap">${escHtml(r.category)}</td>`;
+    html += `<td class="nowrap">${escHtml(r.version)}</td>`;
+    html += `<td class="nowrap ${r.disabled === '是' ? 'disabled' : ''}">${escHtml(r.disabled)}</td>`;
+    html += `<td>${escHtml(r.author)}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table></body></html>';
+  await fsp.writeFile(filePath, html, 'utf-8');
+}
+
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function autoExportModIndex(triggerSource) {
+  if (!state.scanResults || !state.modsFolder) return;
+  try {
+    const rows = buildModIndexRows();
+    if (rows.length === 0) return;
+    const root = getBackupRoot();
+    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+    const ts = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const suffix = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+    const csvPath = path.join(root, `MOD索引表_${suffix}.csv`);
+    const htmlPath = path.join(root, `MOD索引表_${suffix}.html`);
+    await Promise.all([
+      writeModIndexCsv(rows, csvPath),
+      writeModIndexHtml(rows, htmlPath),
+    ]);
+    opLog('EXPORT_MOD_INDEX', `${triggerSource}: 已生成 ${csvPath} 和 ${htmlPath}`);
+    return { csvPath, htmlPath, count: rows.length };
+  } catch (e) {
+    console.error('[autoExportModIndex] 失败:', e);
+    opLog('EXPORT_MOD_INDEX_ERR', `${triggerSource}: ${e.message}`);
+  }
+}
+
+ipcMain.handle('export-mod-index', async (event, opts) => {
+  if (!state.scanResults) return { error: '请先执行深度扫描' };
+  const rows = buildModIndexRows();
+  if (rows.length === 0) return { error: '没有可导出的 MOD 文件' };
+  const root = (opts && opts.outputDir) || getBackupRoot();
+  if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+  const format = (opts && opts.format) || 'csv';
+  const ts = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const suffix = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+  const fileName = `MOD索引表_${suffix}.${format === 'html' ? 'html' : 'csv'}`;
+  const filePath = path.join(root, fileName);
+  try {
+    if (format === 'html') await writeModIndexHtml(rows, filePath);
+    else await writeModIndexCsv(rows, filePath);
+    opLog('EXPORT_MOD_INDEX', `手动导出 ${filePath}`);
+    return { ok: true, filePath, count: rows.length };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
 
 ipcMain.handle('add-whitelist', async (event, keys) => {
   for (const k of keys) {
@@ -1953,6 +2151,56 @@ ipcMain.handle('get-categories', async () => {
  * payload: { tree, renamedPaths: [{oldPath, newPath}], removedPaths: [[...]] }
  * 重命名/移动会同步更新已有分类记录；删除会把受影响文件分类重置为“未识别”
  */
+// 标签绑定分类与分类树保持同步：重命名/移动改写绑定路径，删除解绑，失联绑定自动修复
+function syncTagBindingsWithTree(renamedPaths, removedPaths, tree) {
+  const joinPath = (arr) => (Array.isArray(arr) ? arr.join('/') : String(arr));
+  const existsInTree = (p) => {
+    if (!Array.isArray(p) || p.length === 0) return true; // 未绑定视为有效
+    let nodes = tree;
+    for (const seg of p) {
+      const hit = (nodes || []).find(n => n.name === seg);
+      if (!hit) return false;
+      nodes = hit.children;
+    }
+    return true;
+  };
+  state.tags = (state.tags || []).map(t => {
+    if (!t) return t;
+    const obj = typeof t === 'string' ? { name: t, source: 'manual', category: null } : t;
+    let cat = (Array.isArray(obj.category) && obj.category.length > 0) ? obj.category.slice() : null;
+    if (!cat) return obj;
+    const key = joinPath(cat);
+    let changed = false;
+    // 重命名/移动：精确改写绑定路径（含整棵子树的重命名对）
+    for (const r of renamedPaths) {
+      if (!r || !Array.isArray(r.oldPath) || !Array.isArray(r.newPath)) continue;
+      if (key === joinPath(r.oldPath)) {
+        cat = r.newPath.slice();
+        changed = true;
+        break;
+      }
+    }
+    // 删除：绑定路径命中被删节点或其子树 → 解绑
+    if (!changed) {
+      for (const rm of removedPaths) {
+        const rmKey = joinPath(rm);
+        if (key === rmKey || key.startsWith(rmKey + '/')) {
+          cat = null;
+          changed = true;
+          break;
+        }
+      }
+    }
+    // 失联修复：绑定路径在新树中不存在 → 解绑
+    if (cat && !existsInTree(cat)) {
+      cat = null;
+      changed = true;
+    }
+    if (!changed) return obj;
+    return { ...obj, category: cat };
+  });
+}
+
 ipcMain.handle('update-categories', async (event, payload) => {
   const tree = payload && payload.tree;
   const renamedPaths = (payload && payload.renamedPaths) || [];
@@ -1982,10 +2230,12 @@ ipcMain.handle('update-categories', async (event, payload) => {
       }
     }
   }
+  // 同步标签绑定的目标分类（保持与分类树一致）
+  syncTagBindingsWithTree(renamedPaths, removedPaths, tree);
   state.categories = tree;
   saveState();
   opLog('UPDATE_CATEGORIES', `分类树已更新（${renamedPaths.length} 项重命名/移动，${removedPaths.length} 项删除）`);
-  return { ok: true, categories: state.categories };
+  return { ok: true, categories: state.categories, tags: state.tags, classifications: state.classifications };
 });
 
 ipcMain.handle('add-category', async (event, parentPath, name) => {
@@ -2137,7 +2387,64 @@ ipcMain.handle('execute-move', async () => {
     }
   }
   saveState();
-  return { moved, errors, skipped, movedCount: moved.length };
+
+  // 迁移分类记录中的旧路径到新路径，保证索引表中的分类信息正确
+  const pathMap = {};
+  for (const m of moved) pathMap[m.from] = m.to;
+  for (const oldPath of Object.keys(state.classifications)) {
+    if (pathMap[oldPath]) {
+      state.classifications[pathMap[oldPath]] = state.classifications[oldPath];
+      delete state.classifications[oldPath];
+    }
+  }
+
+  // 创建并移动后自动刷新扫描结果并生成 MOD 索引表
+  let indexResult = null;
+  if (state.modsFolder) {
+    try {
+      // 简单重新扫描文件列表（不重复完整性检测）以保持索引与磁盘一致
+      const refreshed = [];
+      await walkDir(state.modsFolder, async (file) => {
+        const stat = await fsp.stat(file).catch(() => null);
+        if (!stat) return;
+        const rawName = path.basename(file);
+        const disabled = rawName.toLowerCase().endsWith('.disabled');
+        const realBase = disabled ? rawName.slice(0, -'.disabled'.length) : rawName;
+        const realExt = path.extname(realBase).toLowerCase();
+        refreshed.push({
+          path: file,
+          relPath: path.relative(state.modsFolder, file),
+          name: rawName,
+          ext: path.extname(rawName).toLowerCase(),
+          disabled,
+          modExt: (realExt === '.package' || realExt === '.ts4script') ? realExt : '',
+          size: stat.size,
+          mtime: stat.mtime.toISOString(),
+          author: extractAuthor(file),
+        });
+      });
+      // 保留已有中文名/分类等元数据
+      const metaMap = new Map((state.scanResults ? state.scanResults.files : []).map(f => [f.path, f]));
+      for (const f of refreshed) {
+        const old = metaMap.get(f.path);
+        if (old) {
+          if (old.chineseName) f.chineseName = old.chineseName;
+          if (old.nonstandard) f.nonstandard = old.nonstandard;
+        }
+      }
+      state.scanResults = {
+        ...(state.scanResults || {}),
+        root: state.modsFolder,
+        files: refreshed,
+        movedAt: new Date().toISOString(),
+      };
+      indexResult = await autoExportModIndex('创建并移动');
+      saveState();
+    } catch (e) {
+      console.error('[executeMove] 移动后刷新索引失败:', e);
+    }
+  }
+  return { moved, errors, skipped, movedCount: moved.length, indexFiles: indexResult ? { csv: indexResult.csvPath, html: indexResult.htmlPath } : null };
 });
 
 // ============ IPC: 图片预览 ============

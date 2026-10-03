@@ -475,6 +475,14 @@
                 <option value="manual">手动勾选删除（手动勾选要删除的文件）</option>
               </select>
             </div>
+            <div class="settings-row">
+              <label class="settings-label">备份文件夹路径</label>
+              <div style="flex:1;display:flex;gap:8px;align-items:center;">
+                <input type="text" id="txtBackupFolder" class="search-input" placeholder="默认：桌面/Sims4YCC_Backups" style="flex:1" readonly>
+                <button id="btnSelectBackupFolder" class="btn btn-sm">浏览…</button>
+                <button id="btnResetBackupFolder" class="btn btn-sm">恢复默认</button>
+              </div>
+            </div>
             <div class="settings-row" style="align-items:flex-start;">
               <label class="settings-label">说明</label>
               <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
@@ -484,7 +492,7 @@
                 3. 保留最新文件：类型相同则保留修改日期较新的<br>
                 4. 保留较大文件：日期相同则保留文件更大的<br><br>
                 <strong>删除安全机制（两种模式共用）：</strong><br>
-                · 删除前自动备份到 <code>Mods/_deleted_backup/[时间戳]/</code><br>
+                · 删除前自动备份到自定义文件夹（默认：桌面/Sims4YCC_Backups/[时间戳]/）<br>
                 · 支持"撤销上次删除"一键恢复<br>
                 · 所有操作记录到 operations.log
               </div>

@@ -1797,6 +1797,27 @@ function bindSettingsPage() {
       toast('冲突删除默认模式已保存：' + (v === 'auto' ? '自动智能删除' : '手动勾选删除'), 'success');
     });
   }
+  // 备份路径设置
+  const btnSelectBackup = $('#btnSelectBackupFolder');
+  const btnResetBackup = $('#btnResetBackupFolder');
+  if (btnSelectBackup) {
+    btnSelectBackup.addEventListener('click', async () => {
+      const r = await api.selectBackupFolder();
+      if (r && !r.canceled && r.path) {
+        $('#txtBackupFolder').value = r.path;
+        toast('备份路径已设置为：' + r.path, 'success');
+      }
+    });
+  }
+  if (btnResetBackup) {
+    btnResetBackup.addEventListener('click', async () => {
+      const r = await api.resetBackupFolder();
+      if (r && r.ok) {
+        $('#txtBackupFolder').value = r.folder;
+        toast('已恢复默认备份路径：' + r.folder, 'success');
+      }
+    });
+  }
   console.log('[bindSettingsPage] 绑定完成');
 }
 
@@ -1823,6 +1844,11 @@ async function loadSettingsPage() {
       let m = 'auto';
       try { const r = await api.getConflictDeleteMode(); if (r && r.mode) m = r.mode; } catch (e) {}
       selDelMode.value = (m === 'manual') ? 'manual' : 'auto';
+    }
+    // 加载备份路径
+    const txtBackup = $('#txtBackupFolder');
+    if (txtBackup) {
+      try { txtBackup.value = await api.getBackupFolder(); } catch (e) {}
     }
   } catch (e) {
     console.error('加载设置失败:', e);
@@ -2119,6 +2145,8 @@ async function renameCategoryNode(nodePath, oldName) {
   });
   if (res && res.ok) {
     appState.categories = res.categories || appState.categories;
+    appState.tags = res.tags || appState.tags;                 // 标签绑定分类随树改写
+    appState.classifications = res.classifications || appState.classifications; // 文件分类记录随树改写
     if (appState.selectedCategoryPath && isSameOrDescendant(nodePath, appState.selectedCategoryPath)) {
       const rel = appState.selectedCategoryPath.slice(nodePath.length);
       appState.selectedCategoryPath = [...newPath, ...rel];
@@ -2126,6 +2154,7 @@ async function renameCategoryNode(nodePath, oldName) {
     }
     renderCategoryTree();
     populateTagCategorySelect();
+    renderTagManager();
     renderClassifyFileList();
     toast('分类已重命名', 'success');
   } else {
@@ -2144,12 +2173,16 @@ async function deleteCategoryNode(nodePath) {
   });
   if (res && res.ok) {
     appState.categories = res.categories || appState.categories;
+    appState.tags = res.tags || appState.tags;                 // 绑定被删分类的标签已自动解绑
+    appState.classifications = res.classifications || appState.classifications; // 受影响文件已重置为"未识别"
     if (appState.selectedCategoryPath && isSameOrDescendant(nodePath, appState.selectedCategoryPath)) {
       appState.selectedCategoryPath = [];
       $('#selectedCategoryDisplay').textContent = '未选择分类';
     }
     renderCategoryTree();
     populateTagCategorySelect();
+    renderTagManager();
+    renderClassifyFileList();
     toast('分类已删除，受影响文件已重置为“未识别”', 'success');
   } else {
     toast((res && res.error) || '删除失败', 'error');
@@ -2225,6 +2258,8 @@ async function moveCategoryNode(srcPath, destChildrenPath) {
   const res = await api.updateCategories({ tree: appState.categories, renamedPaths });
   if (res && res.ok) {
     appState.categories = res.categories || appState.categories;
+    appState.tags = res.tags || appState.tags;                 // 标签绑定分类随树移动改写
+    appState.classifications = res.classifications || appState.classifications; // 文件分类记录随树移动改写
     if (appState.selectedCategoryPath && isSameOrDescendant(srcPath, appState.selectedCategoryPath)) {
       const rel = appState.selectedCategoryPath.slice(srcPath.length);
       appState.selectedCategoryPath = [...newPath, ...rel];
@@ -2232,6 +2267,8 @@ async function moveCategoryNode(srcPath, destChildrenPath) {
     }
     renderCategoryTree();
     populateTagCategorySelect();
+    renderTagManager();
+    renderClassifyFileList();
     toast('分类层级已调整', 'success');
   } else {
     toast((res && res.error) || '层级调整失败', 'error');
@@ -2299,6 +2336,9 @@ function renderTagManager() {
       if (res && res.ok) {
         appState.tags = res.tags || appState.tags;
         renderTagManager();
+        // 同步刷新分类树与绑定下拉框，保持两侧一致
+        renderCategoryTree();
+        populateTagCategorySelect();
         renderClassifyFileList();
         toast('标签绑定分类已更新', 'success');
       } else {
@@ -2322,7 +2362,7 @@ function renderTagManager() {
         }
         renderTagManager();
         renderTagSuggestions();
-        loadTags();
+        await loadTags();
         renderClassifyFileList();
         toast('标签已重命名', 'success');
       } else {
@@ -2342,7 +2382,7 @@ function renderTagManager() {
         renderSelectedTags();
         renderTagManager();
         renderTagSuggestions();
-        loadTags();
+        await loadTags();
         renderClassifyFileList();
         toast('标签已删除', 'success');
       } else {
@@ -2397,7 +2437,10 @@ async function addTagFromInput() {
   renderTagSuggestions();
   renderSelectedTags();
   renderTagManager();
-  loadTags();
+  // 同步刷新分类树与绑定下拉框，保持两侧一致
+  await loadTags();
+  renderCategoryTree();
+  populateTagCategorySelect();
 }
 
 function renderClassifyFileList() {
@@ -2888,7 +2931,13 @@ async function executeMove() {
     area.innerHTML = html;
     bindMoveGroupToggles(area);
 
-    toast(`移动完成：${result.movedCount} 个文件`, 'success');
+    let toastMsg = `移动完成：${result.movedCount} 个文件`;
+    if (result.indexFiles && (result.indexFiles.csv || result.indexFiles.html)) {
+      const csvName = result.indexFiles.csv ? normalizePath(result.indexFiles.csv).split('/').pop() : '';
+      const htmlName = result.indexFiles.html ? normalizePath(result.indexFiles.html).split('/').pop() : '';
+      toastMsg += `；MOD 索引表已生成：${[csvName, htmlName].filter(Boolean).join('、')}`;
+    }
+    toast(toastMsg, 'success');
     markStepDone('move');
     // 重新扫描以更新状态
     await runDeepScan();
