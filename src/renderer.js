@@ -43,6 +43,12 @@ const appState = {
   // AI 助手
   aiChatMessages: [],           // { role: 'user'|'assistant', content }
   currentDetailFilePath: null,  // 当前打开的 MOD 详情文件路径
+  // 视图与缩放
+  classifyView: 'grid',         // grid | list | table
+  classifyZoom: 3,              // 1~5
+  moveView: 'tree',             // tree | grid | list | table
+  moveZoom: 3,                  // 1~5
+  fileListScroll: {},           // 各列表滚动位置缓存 { listId: top }
 };
 
 // ============ 工具函数 ============
@@ -103,6 +109,107 @@ function toast(msg, type = '') {
   t.className = 'toast ' + type;
   setTimeout(() => t.classList.add('hidden'), 2500);
 }
+
+/** 创建 Toggle Switch 开关 */
+function createToggleSwitch(enabled, onChange, labels = { on: '启用', off: '停用' }) {
+  const wrap = document.createElement('label');
+  wrap.className = 'toggle-switch' + (enabled ? ' enabled' : '');
+  wrap.innerHTML = `
+    <span class="toggle-switch-label off">${esc(labels.off)}</span>
+    <span class="toggle-switch-track"><span class="toggle-switch-thumb"></span></span>
+    <span class="toggle-switch-label on">${esc(labels.on)}</span>
+  `;
+  wrap.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const newState = !wrap.classList.contains('enabled');
+    wrap.classList.toggle('enabled', newState);
+    if (onChange) onChange(newState);
+  });
+  return wrap;
+}
+
+/** 更新 Toggle Switch 状态 */
+function setToggleSwitch(switchEl, enabled) {
+  if (!switchEl) return;
+  switchEl.classList.toggle('enabled', enabled);
+}
+
+/** 切换文件列表视图（分类页 / 创建并移动页通用） */
+function cycleViewMode(page) {
+  const orders = { classify: ['grid', 'list', 'table'], move: ['tree', 'grid', 'list', 'table'] };
+  const current = page === 'classify' ? appState.classifyView : appState.moveView;
+  const arr = orders[page];
+  const idx = arr.indexOf(current);
+  const next = arr[(idx + 1) % arr.length];
+  setViewMode(page, next);
+}
+
+function setViewMode(page, view) {
+  if (page === 'classify') {
+    appState.classifyView = view;
+    const container = $('#classifyFileList');
+    const btn = $('#btnClassifyViewToggle');
+    if (container) container.setAttribute('data-view', view);
+    if (btn) {
+      btn.setAttribute('data-view', view);
+      const labels = { grid: '⊞ 网格', list: '☰ 列表', table: '▦ 表格' };
+      btn.textContent = labels[view] || view;
+    }
+    saveViewSettings();
+  } else if (page === 'move') {
+    appState.moveView = view;
+    const container = $('#moveFileList');
+    const btn = $('#btnMoveViewToggle');
+    if (container) container.setAttribute('data-view', view);
+    if (btn) {
+      btn.setAttribute('data-view', view);
+      const labels = { tree: '🌳 树状', grid: '⊞ 网格', list: '☰ 列表', table: '▦ 表格' };
+      btn.textContent = labels[view] || view;
+    }
+    saveViewSettings();
+  }
+}
+
+function setZoomLevel(page, level) {
+  level = Math.max(1, Math.min(5, parseInt(level, 10) || 3));
+  if (page === 'classify') {
+    appState.classifyZoom = level;
+    const container = $('#classifyFileList');
+    const slider = $('#classifyZoom');
+    if (container) container.setAttribute('data-zoom', level);
+    if (slider) slider.value = level;
+  } else if (page === 'move') {
+    appState.moveZoom = level;
+    const container = $('#moveFileList');
+    const slider = $('#moveZoom');
+    if (container) container.setAttribute('data-zoom', level);
+    if (slider) slider.value = level;
+  }
+  saveViewSettings();
+}
+
+async function saveViewSettings() {
+  try {
+    await api.setGeneralSettings({
+      classifyView: appState.classifyView,
+      classifyZoom: appState.classifyZoom,
+      moveView: appState.moveView,
+      moveZoom: appState.moveZoom,
+    });
+  } catch (e) { /* 忽略 */ }
+}
+
+async function loadViewSettings() {
+  try {
+    const st = await api.getGeneralSettings();
+    if (st.classifyView) appState.classifyView = st.classifyView;
+    if (st.classifyZoom) appState.classifyZoom = st.classifyZoom;
+    if (st.moveView) appState.moveView = st.moveView;
+    if (st.moveZoom) appState.moveZoom = st.moveZoom;
+  } catch (e) { /* 忽略 */ }
+}
+
 /**
  * 停用/恢复操作后刷新本地共享状态（单文件、批量、文件夹级通用）
  * 两个页面（锚定保护 / 分类与打标签）读取同一份 scanResults/classifications，保证状态同步
@@ -181,6 +288,9 @@ async function init() {
     console.error('获取版本号失败:', e);
   }
 
+  // 加载视图与缩放设置
+  await loadViewSettings();
+
   // 加载通用设置（主题、语言、启动时自动扫描）
   try {
     const general = await api.getGeneralSettings();
@@ -248,16 +358,22 @@ function bindNavigation() {
 }
 
 function switchStep(step) {
+  const pageEl = $(`#page-${step}`);
+  if (!pageEl) {
+    toast('该功能页面暂未实现，敬请期待', 'info');
+    return;
+  }
   appState.currentStep = step;
   $$('.task-item').forEach(i => i.classList.toggle('active', i.dataset.step === step));
   $$('.page').forEach(p => p.classList.remove('active'));
-  $(`#page-${step}`).classList.add('active');
+  pageEl.classList.add('active');
 
   // 按需渲染
   if (step === 'overview') renderOverview();
   if (step === 'anchor') renderAnchorPage();
   if (step === 'classify') renderClassifyPage();
   if (step === 'translation') renderTranslationPage();
+  if (step === 'move') renderMovePage();
   if (step === 'settings') loadSettingsPage();
 }
 
@@ -943,6 +1059,7 @@ async function renderAnchoredList() {
       </div>
     `;
     list.appendChild(wrap);
+    if (expanded) initAnchorToggleSwitches(wrap);
   }
 
   // 展开/折叠
@@ -959,6 +1076,7 @@ async function renderAnchoredList() {
         body.innerHTML = renderAnchorFileRows(p, files);
         body.classList.remove('hidden');
         el.textContent = '▼';
+        initAnchorToggleSwitches(body);
         bindAnchorFileRowEvents(body);
       } else {
         appState.anchorExpanded.delete(p);
@@ -1023,7 +1141,7 @@ async function renderAnchoredList() {
   $('#anchorSelectedCount').textContent = `已选 ${appState.anchorSelectedFiles.size} 个文件`;
 }
 
-// 渲染锚定文件夹展开后的文件行（checkbox + 独立停用开关 + 定位）
+// 渲染锚定文件夹展开后的文件行（checkbox + Toggle Switch + 定位）
 function renderAnchorFileRows(folderPath, files) {
   if (!files || files.length === 0) {
     return '<div class="empty-state" style="padding:10px">该文件夹下没有 .package / .ts4script 文件</div>';
@@ -1031,25 +1149,49 @@ function renderAnchorFileRows(folderPath, files) {
   return files.map(f => {
     const selected = appState.anchorSelectedFiles.has(f.path);
     const isDisabled = f.disabled;
-    const toggleBtn = isDisabled
-      ? `<button class="toggle-btn toggle-off" data-toggle="${esc(f.path)}" data-enable="1" title="点击恢复（移除 .disabled）">已停用</button>`
-      : `<button class="toggle-btn toggle-on" data-toggle="${esc(f.path)}" data-enable="0" title="点击停用（添加 .disabled）">启用</button>`;
     return `
       <div class="file-item anchor-file-item ${isDisabled ? 'mod-disabled' : ''}" data-path="${esc(f.path)}">
         <input type="checkbox" class="file-checkbox anchor-file-cb" data-path="${esc(f.path)}" ${selected ? 'checked' : ''}>
         <span class="folder-icon">${f.ext === '.ts4script' ? '⚙' : '📦'}</span>
         <div style="flex:1;min-width:0">
-          <div class="folder-name">${esc(f.name)}</div>
+          <div class="folder-name">${esc(f.name)}${isDisabled ? ' <span class="disabled-badge">已停用</span>' : ''}</div>
           <div class="folder-path">${esc(f.path)} · ${fmtSize(f.size)}</div>
         </div>
-        ${toggleBtn}
+        <span class="anchor-toggle-wrap" data-path="${esc(f.path)}" data-enabled="${!isDisabled}"></span>
         <button class="locate-btn" data-locate="${esc(f.path)}" title="定位">📂</button>
       </div>
     `;
   }).join('');
 }
 
-// 绑定展开区域内文件行的勾选/开关/定位事件
+/** 将锚定页文件行中的 toggle 占位符替换为 Toggle Switch */
+function initAnchorToggleSwitches(area) {
+  area.querySelectorAll('.anchor-toggle-wrap').forEach(wrap => {
+    const p = wrap.dataset.path;
+    const enabled = wrap.dataset.enabled === 'true';
+    const sw = createToggleSwitch(enabled, async (newState) => {
+      try {
+        const r = await api.toggleMod(p, newState);
+        await refreshScanState();
+        // 勾选集合中移除旧路径（文件已重命名）
+        appState.anchorSelectedFiles.delete(p);
+        appState.anchorFilesCache = {};
+        if (r.ok) {
+          toast(newState ? '已启用' : '已停用', 'success');
+        } else {
+          toast('操作失败：' + (r.error || '未知错误'), 'error');
+        }
+        renderAnchoredList();
+        renderOverview();
+      } catch (err) {
+        toast('操作失败：' + err.message, 'error');
+      }
+    }, { on: '启用', off: '停用' });
+    wrap.replaceWith(sw);
+  });
+}
+
+// 绑定展开区域内文件行的勾选/定位事件（Toggle Switch 在 initAnchorToggleSwitches 中绑定）
 function bindAnchorFileRowEvents(area) {
   area.querySelectorAll('.anchor-file-cb').forEach(cb => {
     cb.addEventListener('change', (e) => {
@@ -1058,31 +1200,6 @@ function bindAnchorFileRowEvents(area) {
       if (cb.checked) appState.anchorSelectedFiles.add(p);
       else appState.anchorSelectedFiles.delete(p);
       $('#anchorSelectedCount').textContent = `已选 ${appState.anchorSelectedFiles.size} 个文件`;
-    });
-  });
-  area.querySelectorAll('.toggle-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const p = btn.dataset.toggle;
-      const enable = btn.dataset.enable === '1';
-      btn.disabled = true;
-      try {
-        const r = await api.toggleMod(p, enable);
-        await refreshScanState();
-        // 勾选集合中移除旧路径（文件已重命名）
-        appState.anchorSelectedFiles.delete(p);
-        appState.anchorFilesCache = {};
-        if (r.ok) {
-          toast(enable ? '已恢复' : '已停用', 'success');
-        } else {
-          toast('操作失败：' + (r.error || '未知错误'), 'error');
-        }
-        renderAnchoredList();
-        renderOverview();
-      } catch (err) {
-        toast('操作失败：' + err.message, 'error');
-        btn.disabled = false;
-      }
     });
   });
   bindLocateButtons(area);
@@ -2009,6 +2126,61 @@ function bindClassifyPage() {
       renderOverview();
     });
   }
+
+  // 视图切换
+  const btnViewToggle = $('#btnClassifyViewToggle');
+  if (btnViewToggle) {
+    btnViewToggle.addEventListener('click', () => cycleViewMode('classify'));
+  }
+  const sliderZoom = $('#classifyZoom');
+  if (sliderZoom) {
+    sliderZoom.addEventListener('input', () => setZoomLevel('classify', sliderZoom.value));
+  }
+  // 更多操作菜单
+  const btnMore = $('#btnClassifyMore');
+  const moreMenu = $('#classifyMoreMenu');
+  if (btnMore && moreMenu) {
+    btnMore.addEventListener('click', (e) => {
+      e.stopPropagation();
+      moreMenu.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (e) => {
+      if (!moreMenu.contains(e.target) && e.target !== btnMore) moreMenu.classList.add('hidden');
+    });
+    $('#btnClassifySelectAll').addEventListener('click', () => {
+      moreMenu.classList.add('hidden');
+      selectAllClassifyFiles(true);
+    });
+    $('#btnClassifyClearSelection').addEventListener('click', () => {
+      moreMenu.classList.add('hidden');
+      selectAllClassifyFiles(false);
+    });
+    $('#btnClassifyExportIndex').addEventListener('click', () => {
+      moreMenu.classList.add('hidden');
+      exportClassifyIndex();
+    });
+  }
+}
+
+function selectAllClassifyFiles(select) {
+  const list = $('#classifyFileList');
+  list.querySelectorAll('.file-checkbox:not(:disabled)').forEach(cb => {
+    cb.checked = select;
+    const p = cb.dataset.path;
+    if (select) appState.selectedFiles.add(p); else appState.selectedFiles.delete(p);
+    cb.closest('.file-item').classList.toggle('selected', select);
+  });
+  $('#classifySelectedCount').textContent = `已选 ${appState.selectedFiles.size} 项`;
+}
+
+async function exportClassifyIndex() {
+  try {
+    const r = await api.exportModIndex({ format: 'csv' });
+    if (r && r.csvPath) toast('索引已导出：' + r.csvPath, 'success');
+    else toast('导出失败', 'error');
+  } catch (e) {
+    toast('导出失败：' + e.message, 'error');
+  }
 }
 
 // ============ 设置页面 ============
@@ -2440,6 +2612,8 @@ async function renderClassifyPage() {
   populateTagCategorySelect();
   renderTagManager();
   renderTagSuggestions();
+  setViewMode('classify', appState.classifyView);
+  setZoomLevel('classify', appState.classifyZoom);
   renderClassifyFileList();
 }
 
@@ -2966,9 +3140,13 @@ function renderClassifyFileList() {
     list.innerHTML = '<div class="empty-state">请先执行深度扫描</div>';
     return;
   }
+  const view = appState.classifyView;
   const keyword = $('#classifySearch').value.trim().toLowerCase();
   const tagFilter = $('#tagFilter').value;
   const sourceFilter = $('#tagSourceFilter').value || 'all';
+
+  // 保存当前滚动位置
+  appState.fileListScroll['classify'] = list.scrollTop;
 
   // 标签筛选优先于名称排序
   let files = appState.scanResults.files.filter(f => f.ext === '.package' || f.ext === '.ts4script');
@@ -2994,14 +3172,12 @@ function renderClassifyFileList() {
   // 标签/分类筛选
   if (tagFilter) {
     if (tagFilter.startsWith('__cat__')) {
-      // 系统分类筛选：按顶级分类名匹配
-      const catName = tagFilter.slice(6); // 去掉 __cat__ 前缀
+      const catName = tagFilter.slice(6);
       files = files.filter(f => {
         const c = appState.classifications[f.path];
         return c && c.category && c.category.length > 0 && c.category[0] === catName;
       });
     } else {
-      // 用户标签筛选
       files = files.filter(f => {
         const c = appState.classifications[f.path];
         return c && c.tags && c.tags.includes(tagFilter);
@@ -3012,7 +3188,7 @@ function renderClassifyFileList() {
   if (keyword) {
     files = files.filter(f => f.name.toLowerCase().includes(keyword));
   }
-  // 排序：标签筛选结果优先，其次按名称
+  // 排序：按名称
   files.sort((a, b) => a.name.localeCompare(b.name));
 
   $('#classifySelectedCount').textContent = `已选 ${appState.selectedFiles.size} 项 / 共 ${files.length} 项`;
@@ -3022,61 +3198,115 @@ function renderClassifyFileList() {
     return;
   }
 
-  // 构建 path → level 映射（含损坏/警告/非标准）
+  // 构建 path → level 映射
   const levelMap = {};
   (appState.damagedFiles || []).forEach(d => { levelMap[d.path] = d.level || 'critical'; });
 
-  list.innerHTML = files.map(f => {
+  // 表格视图表头
+  let html = '';
+  if (view === 'table') {
+    html += `
+      <div class="file-table-header">
+        <span></span>
+        <span class="sortable" data-sort="name">文件名 ↕</span>
+        <span class="sortable" data-sort="category">分类 ↕</span>
+        <span class="sortable" data-sort="size">大小 ↕</span>
+        <span class="sortable" data-sort="version">版本 ↕</span>
+        <span>状态</span>
+        <span>操作</span>
+      </div>
+    `;
+  }
+
+  const itemHtml = files.map(f => {
     const anchored = isAnchoredFile(f.path);
     const cls = appState.classifications[f.path];
     const selected = appState.selectedFiles.has(f.path);
     const fLevel = levelMap[f.path] || (f.nonstandard ? 'nonstandard' : (f.level || 'normal'));
     const autoAssigned = cls && cls.auto === true;
     const manualAssigned = cls && cls.auto === false && cls.category && cls.category.length > 0;
-    const authorBadge = f.author && f.author !== '未知' ? `<span class="author-badge" title="作者">👤 ${esc(f.author)}</span>` : '';
     const levelBadgeText = { critical: '严重损坏', warning: '警告', nonstandard: '非标准' };
     const levelBorder = { critical: 'var(--danger)', warning: 'var(--warning)', nonstandard: 'var(--border)' };
     const showLevelBadge = fLevel === 'critical' || fLevel === 'warning' || fLevel === 'nonstandard';
-    // 中文名称：从本地索引读取（容错：缺失时显示"未翻译"）
     const hasZh = f.chineseName && String(f.chineseName).trim().length > 0;
     const zhNameDisplay = hasZh ? esc(f.chineseName) : '<span class="zh-name-placeholder">未翻译</span>';
-    // 启用/停用状态
     const isDisabled = f.name.toLowerCase().endsWith('.disabled');
-    const toggleBtn = isDisabled
-      ? `<button class="toggle-btn toggle-off" data-toggle="${esc(f.path)}" data-enable="1" title="点击启用 MOD">停用</button>`
-      : `<button class="toggle-btn toggle-on" data-toggle="${esc(f.path)}" data-enable="0" title="点击停用 MOD（添加 .disabled）">启用</button>`;
-    const tagCorrectedBadge = (cls && cls.__tagCorrected) ? '<span class="tag-correct-badge" title="分类由标签修正">标签修正</span>' : '';
-    // 需求三.4：手动分类/标签与系统自动分类冲突提示（不阻止用户选择）
+    const catText = (cls && cls.category && cls.category.length > 0) ? cls.category.join(' / ') : '未分类';
+    const tagText = (cls && cls.tags && cls.tags.length > 0) ? cls.tags.map(t => esc(t)).join('、') : '';
+    const versionText = f.version || '-';
+    const icon = f.ext === '.ts4script' ? '⚙' : '📦';
+    const tagCorrectedBadge = (cls && cls.__tagCorrected) ? '<span class="tag-correct-badge">标签修正</span>' : '';
     const sysCat = (cls && Array.isArray(cls.__systemCategory) && cls.__systemCategory.length > 0) ? cls.__systemCategory.join(' / ') : null;
     const curCat = (cls && Array.isArray(cls.category) && cls.category.length > 0) ? cls.category.join(' / ') : '';
     const hasConflict = !!sysCat && !!curCat && sysCat !== curCat &&
       (cls.__categorySource === 'manual' || cls.__categorySource === 'tag' || cls.__tagCorrected);
     const conflictBadge = hasConflict
-      ? `<span class="conflict-badge" title="系统自动分类为「${esc(sysCat)}」，但你手动标记为「${esc(curCat)}」，将按你的手动选择处理">⚠ 与系统分类冲突</span>`
+      ? `<span class="conflict-badge" title="系统自动分类为「${esc(sysCat)}」，但你手动标记为「${esc(curCat)}」，将按你的手动选择处理">⚠ 冲突</span>`
       : '';
-    return `
-      <div class="file-item ${anchored ? 'disabled' : ''} ${selected ? 'selected' : ''} ${isDisabled ? 'mod-disabled' : ''}" data-path="${esc(f.path)}" style="${showLevelBadge ? 'border-left:3px solid ' + levelBorder[fLevel] : ''}">
-        <input type="checkbox" class="file-checkbox" data-path="${esc(f.path)}" ${selected ? 'checked' : ''} ${anchored ? 'disabled' : ''}>
-        <span class="folder-icon">${f.ext === '.ts4script' ? '⚙' : '📦'}</span>
-        <div style="flex:1;min-width:0">
-          <div class="folder-name">${esc(f.name)} ${showLevelBadge ? `<span class="damage-badge ${fLevel}">${levelBadgeText[fLevel]}</span>` : ''} ${autoAssigned ? '<span class="auto-badge">自动分类</span>' : ''} ${manualAssigned ? '<span class="manual-badge">手动调整</span>' : ''} ${tagCorrectedBadge} ${conflictBadge}</div>
-          <div class="file-meta">
-            <span class="zh-name-row" title="中文名称"><span class="zh-name-label">中文名:</span> <span class="zh-name-value" data-zh-path="${esc(f.path)}">${zhNameDisplay}</span></span>
-            <span>${esc(f.relPath)}</span>
-            <span>${fmtSize(f.size)}</span>
-            ${cls && cls.category && cls.category.length > 0 ? `<span class="file-cat">${cls.category.join('/')}</span>` : ''}
-            ${cls && cls.tags ? cls.tags.map(t => `<span class="file-tag">${esc(t)}</span>`).join('') : ''}
+    const thumb = `<div class="file-thumb" title="${esc(f.name)}">${icon}</div>`;
+    const statusBadge = `<span class="file-status-badge ${isDisabled ? 'disabled' : 'enabled'}">${isDisabled ? '已停用' : '已启用'}</span>`;
+
+    if (view === 'grid') {
+      return `
+        <div class="file-item ${anchored ? 'anchored' : ''} ${selected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-path="${esc(f.path)}" style="${showLevelBadge ? 'border-left:3px solid ' + levelBorder[fLevel] : ''}">
+          <input type="checkbox" class="file-checkbox" data-path="${esc(f.path)}" ${selected ? 'checked' : ''} ${anchored ? 'disabled' : ''} style="position:absolute;top:8px;left:8px;z-index:2;">
+          ${thumb}
+          <div class="file-info">
+            <div class="file-name" title="${esc(f.name)}">${esc(f.name)} ${showLevelBadge ? `<span class="damage-badge ${fLevel}">${levelBadgeText[fLevel]}</span>` : ''}</div>
+            <div class="file-meta">${zhNameDisplay}</div>
+            <div class="file-meta">${esc(catText)} ${statusBadge}</div>
+            ${tagText ? `<div class="file-meta">${tagText}</div>` : ''}
+          </div>
+          <div class="file-actions">
+            <button class="btn btn-sm detail-btn" data-detail="${esc(f.path)}" title="详情">🔍</button>
+            <button class="btn btn-sm locate-btn" data-locate="${esc(f.path)}" title="定位">📂</button>
           </div>
         </div>
-        ${authorBadge}
-        ${anchored ? '<span class="anchor-badge">已锚定·不可分类</span>' : ''}
-        <button class="zh-edit-btn" data-zh-edit="${esc(f.path)}" title="修改中文名称">✏</button>
-        <button class="detail-btn" data-detail="${esc(f.path)}" title="查看预览图与资源类型">🔍</button>
-        ${toggleBtn}
-        <button class="locate-btn" data-locate="${esc(f.path)}" title="定位">📂</button>
-      </div>
-    `;
+      `;
+    } else if (view === 'list') {
+      return `
+        <div class="file-item ${anchored ? 'anchored' : ''} ${selected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-path="${esc(f.path)}" style="${showLevelBadge ? 'border-left:3px solid ' + levelBorder[fLevel] : ''}">
+          <input type="checkbox" class="file-checkbox" data-path="${esc(f.path)}" ${selected ? 'checked' : ''} ${anchored ? 'disabled' : ''}>
+          ${thumb}
+          <div class="file-info">
+            <span class="file-name" title="${esc(f.name)}">${esc(f.name)} ${showLevelBadge ? `<span class="damage-badge ${fLevel}">${levelBadgeText[fLevel]}</span>` : ''}</span>
+            <span class="file-meta">${zhNameDisplay}</span>
+            <span class="file-meta">${esc(catText)}</span>
+            <span class="file-meta">${fmtSize(f.size)}</span>
+          </div>
+          <div class="file-actions">
+            ${statusBadge}
+            <button class="btn btn-sm detail-btn" data-detail="${esc(f.path)}" title="详情">🔍</button>
+            <button class="btn btn-sm locate-btn" data-locate="${esc(f.path)}" title="定位">📂</button>
+          </div>
+        </div>
+      `;
+    } else {
+      // table
+      return `
+        <div class="file-item ${anchored ? 'anchored' : ''} ${selected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-path="${esc(f.path)}">
+          <input type="checkbox" class="file-checkbox" data-path="${esc(f.path)}" ${selected ? 'checked' : ''} ${anchored ? 'disabled' : ''}>
+          <span class="file-name" title="${esc(f.name)}">${esc(f.name)} ${showLevelBadge ? `<span class="damage-badge ${fLevel}">${levelBadgeText[fLevel]}</span>` : ''}</span>
+          <span class="file-meta" title="${esc(catText)}">${esc(catText)} ${tagCorrectedBadge} ${conflictBadge}</span>
+          <span class="file-meta">${fmtSize(f.size)}</span>
+          <span class="file-meta">${esc(versionText)}</span>
+          <span>${statusBadge}</span>
+          <div class="file-actions">
+            <button class="btn btn-sm detail-btn" data-detail="${esc(f.path)}" title="详情">🔍</button>
+            <button class="btn btn-sm locate-btn" data-locate="${esc(f.path)}" title="定位">📂</button>
+          </div>
+        </div>
+      `;
+    }
   }).join('');
+
+  list.innerHTML = html + itemHtml;
+
+  // 恢复滚动位置
+  requestAnimationFrame(() => {
+    const saved = appState.fileListScroll['classify'];
+    if (saved !== undefined) list.scrollTop = saved;
+  });
 
   // 绑定勾选
   list.querySelectorAll('.file-checkbox').forEach(cb => {
@@ -3093,41 +3323,11 @@ function renderClassifyFileList() {
       $('#classifySelectedCount').textContent = `已选 ${appState.selectedFiles.size} 项`;
     });
   });
-  // 绑定中文名称修改
-  list.querySelectorAll('.zh-edit-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openZhNameEditor(btn.dataset.zhEdit);
-    });
-  });
   // 绑定详情按钮
   list.querySelectorAll('.detail-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       openModDetail(btn.dataset.detail);
-    });
-  });
-  // 绑定启用/停用开关
-  list.querySelectorAll('.toggle-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const p = btn.dataset.toggle;
-      const enable = btn.dataset.enable === '1';
-      btn.disabled = true;
-      try {
-        const r = await api.toggleMod(p, enable);
-        if (r.ok) {
-          toast(enable ? '已启用' : '已停用', 'success');
-          // 重新渲染列表（路径/文件名可能变化）
-          renderClassifyFileList();
-        } else {
-          toast('操作失败：' + (r.error || '未知错误'), 'error');
-        }
-      } catch (err) {
-        toast('操作失败：' + err.message, 'error');
-      } finally {
-        btn.disabled = false;
-      }
     });
   });
   bindLocateButtons(list);
@@ -3228,6 +3428,185 @@ function bindMovePage() {
   $('#btnExecuteMove').addEventListener('click', executeMove);
   $('#moveSearch').addEventListener('input', () => {
     if (appState._movePreviewData) renderMovePreview(appState._movePreviewData);
+    renderMovePage();
+  });
+  const btnViewToggle = $('#btnMoveViewToggle');
+  if (btnViewToggle) btnViewToggle.addEventListener('click', () => cycleViewMode('move'));
+  const sliderZoom = $('#moveZoom');
+  if (sliderZoom) sliderZoom.addEventListener('input', () => setZoomLevel('move', sliderZoom.value));
+}
+
+function renderMovePage() {
+  const container = $('#moveFileList');
+  if (!appState.classifications || Object.keys(appState.classifications).length === 0) {
+    container.innerHTML = '<div class="empty-state">暂无可移动的文件，请先在"分类与打标签"中设置分类</div>';
+    return;
+  }
+  const searchTerm = ($('#moveSearch').value || '').toLowerCase().trim();
+  const transMap = buildTranslationMap();
+  const view = appState.moveView;
+
+  // 保存滚动位置
+  appState.fileListScroll['move'] = container.scrollTop;
+
+  let entries = Object.entries(appState.classifications)
+    .filter(([p, c]) => c.category && c.category.length > 0)
+    .map(([p, c]) => ({
+      path: p,
+      name: basename(p),
+      cat: c.category,
+      zhName: transMap[p] || '',
+      size: 0,
+      version: '',
+      anchored: isAnchoredFile(p),
+      disabled: p.toLowerCase().endsWith('.disabled'),
+    }));
+
+  // 尝试从扫描结果补充大小和版本
+  if (appState.scanResults && appState.scanResults.files) {
+    const fileMap = new Map(appState.scanResults.files.map(f => [f.path, f]));
+    entries.forEach(e => {
+      const f = fileMap.get(e.path);
+      if (f) { e.size = f.size || 0; e.version = f.version || ''; }
+    });
+  }
+
+  if (searchTerm) {
+    entries = entries.filter(e =>
+      e.name.toLowerCase().includes(searchTerm) ||
+      e.cat.join('/').toLowerCase().includes(searchTerm) ||
+      e.zhName.toLowerCase().includes(searchTerm)
+    );
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  // 树状视图：按分类分组
+  if (view === 'tree') {
+    const groups = {};
+    for (const e of entries) {
+      const key = e.cat.join('/');
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(e);
+    }
+    const sortedKeys = Object.keys(groups).sort();
+    container.innerHTML = sortedKeys.map(key => `
+      <div class="file-item">
+        <div class="move-folder-header" data-toggle-folder="${esc(key)}">
+          <span>▼</span>
+          <span>${esc(key)}</span>
+          <span class="move-group-count">${groups[key].length} 个文件</span>
+        </div>
+        <div class="move-folder-body" data-folder-body="${esc(key)}">
+          ${groups[key].map(e => renderMoveFileItem(e, view)).join('')}
+        </div>
+      </div>
+    `).join('');
+    container.querySelectorAll('[data-toggle-folder]').forEach(el => {
+      el.addEventListener('click', () => {
+        const body = container.querySelector(`[data-folder-body="${esc(el.dataset.toggleFolder)}"]`);
+        if (body) body.classList.toggle('hidden');
+      });
+    });
+  } else {
+    if (view === 'table') {
+      container.innerHTML = `
+        <div class="file-table-header">
+          <span></span>
+          <span>文件名</span>
+          <span>分类</span>
+          <span>大小</span>
+          <span>版本</span>
+          <span>状态</span>
+          <span>操作</span>
+        </div>
+      ` + entries.map(e => renderMoveFileItem(e, view)).join('');
+    } else {
+      container.innerHTML = entries.map(e => renderMoveFileItem(e, view)).join('');
+    }
+  }
+
+  bindMoveFileActions(container);
+  requestAnimationFrame(() => {
+    const saved = appState.fileListScroll['move'];
+    if (saved !== undefined) container.scrollTop = saved;
+  });
+}
+
+function renderMoveFileItem(e, view) {
+  const icon = e.path.toLowerCase().endsWith('.ts4script') ? '⚙' : '📦';
+  const statusBadge = `<span class="file-status-badge ${e.disabled ? 'disabled' : 'enabled'}">${e.disabled ? '已停用' : '已启用'}</span>`;
+  const isPackage = extname(e.path).toLowerCase() === '.package';
+  const s4sBtn = isPackage
+    ? `<button class="btn-s4s" data-s4s="${esc(e.path)}" title="用 Sims 4 Studio 打开">🛠 S4S</button>`
+    : '';
+
+  if (view === 'grid') {
+    return `
+      <div class="file-item ${e.anchored ? 'anchored' : ''} ${e.disabled ? 'disabled' : ''}" data-path="${esc(e.path)}">
+        <div class="file-thumb">${icon}</div>
+        <div class="file-info">
+          <div class="file-name" title="${esc(e.name)}">${esc(e.name)}</div>
+          <div class="file-meta">${e.zhName || '未翻译'}</div>
+          <div class="file-meta">${esc(e.cat.join(' / '))} ${statusBadge}</div>
+        </div>
+        <div class="file-actions">${s4sBtn}</div>
+      </div>
+    `;
+  } else if (view === 'list') {
+    return `
+      <div class="file-item ${e.anchored ? 'anchored' : ''} ${e.disabled ? 'disabled' : ''}" data-path="${esc(e.path)}">
+        <div class="file-thumb">${icon}</div>
+        <div class="file-info">
+          <span class="file-name">${esc(e.name)}</span>
+          <span class="file-meta">${e.zhName || '未翻译'}</span>
+          <span class="file-meta">${esc(e.cat.join(' / '))}</span>
+          <span class="file-meta">${fmtSize(e.size)}</span>
+        </div>
+        <div class="file-actions">${statusBadge} ${s4sBtn}</div>
+      </div>
+    `;
+  } else if (view === 'table') {
+    return `
+      <div class="file-item ${e.anchored ? 'anchored' : ''} ${e.disabled ? 'disabled' : ''}" data-path="${esc(e.path)}">
+        <span></span>
+        <span class="file-name">${esc(e.name)}</span>
+        <span class="file-meta">${esc(e.cat.join(' / '))}</span>
+        <span class="file-meta">${fmtSize(e.size)}</span>
+        <span class="file-meta">${esc(e.version || '-')}</span>
+        <span>${statusBadge}</span>
+        <div class="file-actions">${s4sBtn}</div>
+      </div>
+    `;
+  }
+  // tree child default
+  return `
+    <div class="file-item ${e.anchored ? 'anchored' : ''} ${e.disabled ? 'disabled' : ''}" data-path="${esc(e.path)}">
+      <div class="file-info">
+        <span class="file-name">${esc(e.name)}</span>
+        <span class="file-meta">${e.zhName || '未翻译'}</span>
+        <span class="file-meta">${statusBadge}</span>
+      </div>
+      <div class="file-actions">${s4sBtn}</div>
+    </div>
+  `;
+}
+
+async function bindMoveFileActions(container) {
+  container.querySelectorAll('[data-s4s]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const filePath = btn.dataset.s4s;
+      btn.disabled = true;
+      try {
+        const r = await api.openWithS4S(filePath);
+        if (r.error) toast(r.error, 'error');
+        else toast('已用 Sims 4 Studio 打开', 'success');
+      } catch (err) {
+        toast('打开失败：' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
   });
 }
 

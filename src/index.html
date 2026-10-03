@@ -28,79 +28,116 @@
       <!-- 左侧任务栏 -->
       <nav class="sidebar">
         <div class="sidebar-header">任务流程</div>
-        <ul class="task-list" id="taskList">
-          <li class="task-item active" data-step="overview">
-            <span class="task-num">1</span>
-            <span class="task-name">总览</span>
-            <span class="task-actions">
-              <button class="task-btn skip-btn" title="跳过" data-step="overview">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="scan">
-            <span class="task-num">2</span>
-            <span class="task-name">深度扫描</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="scan">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="anchor">
-            <span class="task-num">3</span>
-            <span class="task-name">锚定保护</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="anchor">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="duplicate">
-            <span class="task-num">4</span>
-            <span class="task-name">重复排查</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="duplicate">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="conflict">
-            <span class="task-num">5</span>
-            <span class="task-name">冲突检测</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="conflict">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="translation">
-            <span class="task-num">6</span>
-            <span class="task-name">翻译识别</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="translation">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="classify">
-            <span class="task-num">7</span>
-            <span class="task-name">分类与打标签</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="classify">跳过</button>
-            </span>
-          </li>
-          <li class="task-item" data-step="move">
-            <span class="task-num">8</span>
-            <span class="task-name">创建并移动</span>
-            <span class="task-actions">
-              <button class="task-btn pause-btn" title="暂停">暂停</button>
-              <button class="task-btn skip-btn" title="跳过" data-step="move">跳过</button>
-            </span>
-          </li>
-        </ul>
-        <ul class="task-list">
-          <li class="task-item" data-step="settings">
-            <span class="task-num">⚙</span>
-            <span class="task-name">设置</span>
-          </li>
-        </ul>
-        <div class="sidebar-footer">
-          <!-- 重置按钮已迁移到设置页的数据管理中，避免误触 -->
+        <div class="task-groups" id="taskList">
+          <!-- 准备阶段 -->
+          <div class="task-group">
+            <div class="task-group-title">准备阶段</div>
+            <ul class="task-list">
+              <li class="task-item active" data-step="overview" data-group="prepare">
+                <span class="task-num">1</span>
+                <span class="task-name">总览</span>
+                <span class="task-actions">
+                  <button class="task-btn skip-btn" title="跳过" data-step="overview">跳过</button>
+                </span>
+              </li>
+              <li class="task-item" data-step="scan" data-group="prepare">
+                <span class="task-num">2</span>
+                <span class="task-name">深度扫描</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="scan">跳过</button>
+                </span>
+              </li>
+              <li class="task-item" data-step="anchor" data-group="prepare">
+                <span class="task-num">3</span>
+                <span class="task-name">锚定保护</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="anchor">跳过</button>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <!-- 排查阶段 -->
+          <div class="task-group">
+            <div class="task-group-title">排查阶段</div>
+            <ul class="task-list">
+              <li class="task-item" data-step="duplicate" data-group="inspect">
+                <span class="task-num">4</span>
+                <span class="task-name">重复排查</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="duplicate">跳过</button>
+                </span>
+              </li>
+              <li class="task-item" data-step="conflict" data-group="inspect">
+                <span class="task-num">5</span>
+                <span class="task-name">冲突检测</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="conflict">跳过</button>
+                </span>
+              </li>
+              <li class="task-item" data-step="translation" data-group="inspect">
+                <span class="task-num">6</span>
+                <span class="task-name">翻译识别</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="translation">跳过</button>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <!-- 整理阶段 -->
+          <div class="task-group">
+            <div class="task-group-title">整理阶段</div>
+            <ul class="task-list">
+              <li class="task-item" data-step="classify" data-group="organize">
+                <span class="task-num">7</span>
+                <span class="task-name">分类与打标签</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="classify">跳过</button>
+                </span>
+              </li>
+              <li class="task-item" data-step="move" data-group="organize">
+                <span class="task-num">8</span>
+                <span class="task-name">创建并移动</span>
+                <span class="task-actions">
+                  <button class="task-btn pause-btn" title="暂停">暂停</button>
+                  <button class="task-btn skip-btn" title="跳过" data-step="move">跳过</button>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <!-- 扩展预留区（后续功能如 3D预览/AI助手/索引导出可直接添加） -->
+          <div class="task-group task-group-extension">
+            <div class="task-group-title">扩展功能</div>
+            <ul class="task-list">
+              <li class="task-item" data-step="ai" data-group="extension">
+                <span class="task-num">🤖</span>
+                <span class="task-name">AI 助手</span>
+              </li>
+              <li class="task-item" data-step="index" data-group="extension">
+                <span class="task-num">📑</span>
+                <span class="task-name">索引管理</span>
+              </li>
+            </ul>
+          </div>
+          <!-- 其他 -->
+          <div class="task-group">
+            <div class="task-group-title">其他</div>
+            <ul class="task-list">
+              <li class="task-item" data-step="backup" data-group="other">
+                <span class="task-num">💾</span>
+                <span class="task-name">备份管理</span>
+              </li>
+              <li class="task-item" data-step="settings" data-group="other">
+                <span class="task-num">⚙</span>
+                <span class="task-name">设置</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </nav>
 
@@ -351,18 +388,35 @@
             <!-- 左侧：文件列表 -->
             <div class="classify-files">
               <div class="classify-toolbar">
-                <input type="text" id="classifySearch" class="search-input" placeholder="搜索文件名...">
-                <select id="tagSourceFilter" class="select-input" title="按标签来源筛选">
-                  <option value="all">全部标签</option>
-                  <option value="manual">仅手动标签</option>
-                  <option value="system">仅系统标签</option>
-                </select>
-                <select id="tagFilter" class="select-input"><option value="">按标签筛选</option></select>
-                <button id="btnBatchEnable" class="btn btn-sm" title="批量启用选中的 MOD">批量启用</button>
-                <button id="btnBatchDisable" class="btn btn-sm" title="批量停用选中的 MOD（添加 .disabled 后缀）">批量停用</button>
+                <div class="toolbar-group toolbar-filters">
+                  <input type="text" id="classifySearch" class="search-input" placeholder="搜索文件名...">
+                  <select id="tagSourceFilter" class="select-input" title="按标签来源筛选">
+                    <option value="all">全部标签</option>
+                    <option value="manual">仅手动标签</option>
+                    <option value="system">仅系统标签</option>
+                  </select>
+                  <select id="tagFilter" class="select-input"><option value="">按标签筛选</option></select>
+                </div>
+                <div class="toolbar-group toolbar-actions">
+                  <button id="btnBatchEnable" class="btn btn-sm" title="批量启用选中的 MOD">批量启用</button>
+                  <button id="btnBatchDisable" class="btn btn-sm" title="批量停用选中的 MOD（添加 .disabled 后缀）">批量停用</button>
+                  <div class="toolbar-more-wrap">
+                    <button id="btnClassifyMore" class="btn btn-sm" title="更多操作">⋮ 更多</button>
+                    <div id="classifyMoreMenu" class="toolbar-more-menu hidden">
+                      <button id="btnClassifySelectAll" class="toolbar-more-item">全选当前结果</button>
+                      <button id="btnClassifyClearSelection" class="toolbar-more-item">清空选择</button>
+                      <button id="btnClassifyExportIndex" class="toolbar-more-item">导出索引</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="toolbar-group toolbar-view">
+                  <label class="zoom-label" for="classifyZoom" title="视图密度">🔍</label>
+                  <input type="range" id="classifyZoom" class="zoom-slider" min="1" max="5" value="3" step="1">
+                  <button id="btnClassifyViewToggle" class="btn btn-sm view-toggle" title="切换视图（网格/列表/表格）" data-view="grid">⊞ 网格</button>
+                </div>
                 <span id="classifySelectedCount" class="count-text">已选 0 项</span>
               </div>
-              <div id="classifyFileList" class="file-list"></div>
+              <div id="classifyFileList" class="file-list" data-view="grid" data-zoom="3"></div>
             </div>
             <!-- 右侧：分类标签面板 -->
             <div class="classify-panel">
@@ -399,11 +453,17 @@
             <strong>⚠ 最终步骤：</strong>此操作将根据分类结果物理创建多级文件夹，并将文件剪切至目标子文件夹。<br>
             已锚定模组不会被移动。请确认所有分类完成后执行。
           </div>
-          <div class="page-toolbar">
+          <div class="page-toolbar move-toolbar">
             <input type="text" id="moveSearch" class="search-input" placeholder="搜索文件名或分类..." style="flex:1;min-width:180px">
+            <div class="toolbar-group toolbar-view">
+              <label class="zoom-label" for="moveZoom" title="视图密度">🔍</label>
+              <input type="range" id="moveZoom" class="zoom-slider" min="1" max="5" value="3" step="1">
+              <button id="btnMoveViewToggle" class="btn btn-sm view-toggle" title="切换视图（网格/列表/表格）" data-view="tree">🌳 树状</button>
+            </div>
             <button id="btnPreviewMove" class="btn btn-primary">预览移动计划</button>
             <button id="btnExecuteMove" class="btn btn-danger">执行移动</button>
           </div>
+          <div id="moveFileList" class="move-file-list" data-view="tree" data-zoom="3"></div>
           <div id="moveResultArea" class="result-area"></div>
         </section>
 
