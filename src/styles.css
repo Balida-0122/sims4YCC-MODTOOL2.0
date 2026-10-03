@@ -415,6 +415,7 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .classify-panel {
   background: var(--bg-secondary);
@@ -1980,10 +1981,14 @@ option.tag-user {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
-.toolbar-filters { flex: 1 1 280px; }
-.toolbar-actions { flex: 0 0 auto; }
-.toolbar-view { flex: 0 0 auto; margin-left: auto; }
+.toolbar-filters { flex: 1 1 220px; min-width: 0; }
+.toolbar-filters .search-input,
+.toolbar-filters .select-input { min-width: 0; flex: 1 1 auto; }
+.toolbar-actions { flex: 0 1 auto; flex-wrap: nowrap; }
+.toolbar-view { flex: 0 1 auto; flex-wrap: nowrap; }
+.toolbar-count { flex: 0 1 auto; }
 .toolbar-more-wrap { position: relative; }
 .toolbar-more-menu {
   position: absolute;
@@ -2015,6 +2020,22 @@ option.tag-user {
 .zoom-slider { width: 90px; cursor: pointer; }
 .view-toggle { min-width: 80px; }
 .count-text { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+/* 分类页工具栏窄屏适配 */
+@media (max-width: 1100px) {
+  .classify-layout { grid-template-columns: 1fr 260px; }
+  .toolbar-filters { flex: 1 1 100%; }
+  .toolbar-actions,
+  .toolbar-view,
+  .toolbar-count { flex: 0 1 auto; }
+}
+@media (max-width: 800px) {
+  .classify-layout { grid-template-columns: 1fr; }
+  .classify-panel { order: -1; }
+  .toolbar-filters { flex: 1 1 100%; }
+  .toolbar-actions,
+  .toolbar-view { flex: 1 1 auto; justify-content: flex-start; }
+}
 
 /* ============ Toggle Switch 开关 ============ */
 .toggle-switch {
