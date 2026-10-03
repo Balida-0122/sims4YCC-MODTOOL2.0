@@ -236,10 +236,10 @@ async function walkDir(dir, onFile, onDir) {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (onDir) onDir(full);
+      if (onDir) await onDir(full);
       await walkDir(full, onFile, onDir);
     } else if (entry.isFile()) {
-      if (onFile) onFile(full);
+      if (onFile) await onFile(full);
     }
   }
 }
