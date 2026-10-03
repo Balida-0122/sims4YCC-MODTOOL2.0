@@ -1,6 +1,6 @@
 {
   "name": "sims4ycc-modtool",
-  "version": "2.4.0",
+  "version": "2.4.2",
   "description": "Sims 4 MOD 管理工具",
   "main": "main.js",
   "author": "Sims4YCC",
@@ -9,9 +9,10 @@
     "start": "electron --max-old-space-size=4096 .",
     "dev": "electron --max-old-space-size=4096 . --dev",
     "build:icons": "node scripts/build-icons.js",
-    "build:win": "electron-builder --win --x64",
-    "build:mac": "electron-builder --mac",
-    "build": "electron-builder -mw"
+    "bump-version": "node scripts/bump-version.js",
+    "build:win": "npm run bump-version && electron-builder --win --x64",
+    "build:mac": "npm run bump-version && electron-builder --mac",
+    "build": "npm run bump-version && electron-builder -mw"
   },
   "devDependencies": {
     "@fiahfy/icns": "0.0.7",
@@ -49,7 +50,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",
@@ -73,7 +76,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icon.icns",
@@ -82,7 +88,11 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "notarize": false,
-      "electronLanguages": ["en", "zh_CN", "zh_TW"],
+      "electronLanguages": [
+        "en",
+        "zh_CN",
+        "zh_TW"
+      ],
       "extendInfo": {
         "NSDesktopFolderUsageDescription": "需要访问桌面文件夹，以便读取 Sims 4 Mods 文件夹内容",
         "NSDocumentsFolderUsageDescription": "需要访问文稿文件夹，以便读取 Sims 4 Mods 文件夹内容",
