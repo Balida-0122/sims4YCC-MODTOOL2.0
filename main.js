@@ -1964,6 +1964,124 @@ ipcMain.handle('test-translation', async (event, testText) => {
   }
 });
 
+// ============ AI 通用调用（复用 OpenAI/DeepSeek 兼容配置） ============
+function isAIAvailable() {
+  const config = state.translationConfig;
+  return !!(config && config.apiUrl && config.apiKey && isOpenAICompatible(config.apiUrl));
+}
+
+function callChatAPI(messages, config) {
+  return new Promise((resolve, reject) => {
+    if (!config || !config.apiUrl || !config.apiKey || !isOpenAICompatible(config.apiUrl)) {
+      reject(new Error('AI 功能需要配置 DeepSeek/OpenAI 兼容接口（API 地址 + API Key）'));
+      return;
+    }
+    let finalUrl = config.apiUrl;
+    if (!finalUrl.toLowerCase().endsWith('/chat/completions')) {
+      finalUrl = finalUrl.replace(/\/+$/, '') + '/chat/completions';
+    }
+    const postData = JSON.stringify({
+      model: config.model || 'deepseek-chat',
+      messages,
+      temperature: 0.5,
+      max_tokens: 1500,
+    });
+    const url = new URL(finalUrl);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Content-Length': Buffer.byteLength(postData),
+      },
+      timeout: 60000,
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.choices && json.choices.length > 0 && json.choices[0].message) {
+            resolve(json.choices[0].message.content.trim());
+          } else if (json.error) {
+            const errMsg = typeof json.error === 'string' ? json.error : (json.error.message || JSON.stringify(json.error));
+            reject(new Error(errMsg));
+          } else {
+            reject(new Error('AI 返回格式无法识别'));
+          }
+        } catch (e) {
+          reject(new Error(e.message + '，原始响应：' + data.slice(0, 300)));
+        }
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('AI 请求超时'));
+    });
+    req.write(postData);
+    req.end();
+  });
+}
+
+ipcMain.handle('ai-analyze-conflict', async (event, group) => {
+  if (!isAIAvailable()) return { error: 'AI 功能需要先在设置中配置 DeepSeek/OpenAI 兼容接口（API 地址 + API Key）。当前 LibreTranslate 不支持 AI 分析。' };
+  if (!group || !Array.isArray(group.files) || group.files.length === 0) return { error: '冲突组数据为空' };
+  const filesInfo = group.files.map(f => {
+    const cls = state.classifications[f.path] || {};
+    return `- 文件：${f.name}\n  路径：${f.path}\n  作者：${f.author || '未知'}\n  修改时间：${f.mtime || '未知'}\n  大小：${fmtSize(f.size || 0)}\n  当前分类：${(Array.isArray(cls.category) && cls.category.length > 0) ? cls.category.join('/') : '未识别'}\n  已停用：${f.disabled ? '是' : '否'}`;
+  }).join('\n');
+  const systemPrompt = '你是 Sims 4 MOD 管理专家，擅长分析 MOD 冲突并给出处理建议。请用中文回答，简洁明了。';
+  const userPrompt = `以下是一组 Sims 4 MOD 冲突文件，请分析冲突原因、可能造成的影响，并给出应该保留哪个文件、删除哪个文件的建议。\n\n冲突描述：${group.detail || '未知'}\n冲突类型：${group.conflictType || '未知'}\n冲突严重度：${group.conflictSeverity || '未知'}\n\n文件列表：\n${filesInfo}\n\n请输出：\n1. 冲突原因\n2. 可能的影响\n3. 处理建议（明确说明保留哪个）`;
+  try {
+    const analysis = await callChatAPI([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ], state.translationConfig);
+    opLog('AI_ANALYZE_CONFLICT', `已分析冲突组：${group.detail || group.key || ''}`);
+    return { ok: true, analysis };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('ai-classify-file', async (event, fileInfo) => {
+  if (!isAIAvailable()) return { error: 'AI 功能需要先在设置中配置 DeepSeek/OpenAI 兼容接口（API 地址 + API Key）。当前 LibreTranslate 不支持 AI 分类。' };
+  if (!fileInfo || !fileInfo.name) return { error: '文件信息为空' };
+  const f = fileInfo;
+  const systemPrompt = '你是 Sims 4 MOD 分类专家。请根据文件名和资源类型判断 MOD 最可能属于的分类。分类体系参考：CAS Custom Content（人物/服装/发型/化妆）、Build/Buy Mode Items（建筑/家具/装饰）、Default Replacements（默认替换）、Gameplay Mods（玩法）、Script Mods（脚本）。请直接输出建议的分类路径，使用 / 分隔多级分类，例如 "CAS Custom Content/发型" 或 "BuildBuy/家具/卧室"。只输出分类路径，不要解释。';
+  const userPrompt = `文件名：${f.name}\n中文译名：${f.chineseName || '无'}\n作者：${f.author || '未知'}\n资源类型：${Array.isArray(f.resourceTypes) && f.resourceTypes.length > 0 ? f.resourceTypes.map(r => r.name).join('、') : '未解析'}\n文件大小：${fmtSize(f.size || 0)}\n\n请给出建议的分类路径：`;
+  try {
+    const categoryText = await callChatAPI([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ], state.translationConfig);
+    const category = categoryText.split(/\s*[>\/\\]\s*/).filter(Boolean);
+    opLog('AI_CLASSIFY_FILE', `${f.name} -> ${category.join('/')}`);
+    return { ok: true, category, raw: categoryText };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('ai-chat', async (event, messages) => {
+  if (!isAIAvailable()) return { error: 'AI 功能需要先在设置中配置 DeepSeek/OpenAI 兼容接口（API 地址 + API Key）。当前 LibreTranslate 不支持 AI 对话。' };
+  if (!Array.isArray(messages) || messages.length === 0) return { error: '对话内容为空' };
+  try {
+    const reply = await callChatAPI([
+      { role: 'system', content: '你是 Sims 4 MOD 管理助手，帮助用户管理 Mods 文件夹。你可以回答 MOD 分类、冲突、停用、备份等问题。需要操作文件时，请明确说明应该怎么做。' },
+      ...messages,
+    ], state.translationConfig);
+    return { ok: true, reply };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
 // ============ IPC: 翻译识别 ============
 // opts:
 //   selectedPaths: string[] | null  仅翻译指定路径的文件；为 null/空数组时翻译全部

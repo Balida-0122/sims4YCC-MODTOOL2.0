@@ -90,6 +90,11 @@ contextBridge.exposeInMainWorld('api', {
   setBackupFolder: (folder) => ipcRenderer.invoke('set-backup-folder', folder),
   resetBackupFolder: () => ipcRenderer.invoke('reset-backup-folder'),
 
+  // AI 功能（复用翻译配置中的 DeepSeek/OpenAI 兼容接口）
+  aiAnalyzeConflict: (group) => ipcRenderer.invoke('ai-analyze-conflict', group),
+  aiClassifyFile: (fileInfo) => ipcRenderer.invoke('ai-classify-file', fileInfo),
+  aiChat: (messages) => ipcRenderer.invoke('ai-chat', messages),
+
   // 翻译配置
   getTranslationConfig: () => ipcRenderer.invoke('get-translation-config'),
   setTranslationConfig: (config) => ipcRenderer.invoke('set-translation-config', config),

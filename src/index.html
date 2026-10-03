@@ -256,11 +256,12 @@
             <button id="btnConflictAutoDelete" class="btn btn-danger">自动删除</button>
             <button id="btnConflictManualDelete" class="btn btn-danger hidden">删除选中文件</button>
             <button id="btnConflictUndo" class="btn btn-sm" title="撤销最近一次删除操作">↶ 撤销上次删除</button>
+            <button id="btnAIAnalyzeAll" class="btn btn-sm btn-ai" title="使用 AI 分析所有冲突组（需先在设置中配置 DeepSeek/OpenAI 兼容接口）">🤖 AI 分析全部</button>
             <span id="conflictSummary" class="summary-text"></span>
           </div>
           <div class="conflict-info-banner">
             <strong>说明：</strong>含 .ts4script 的文件夹内文件拥有最高保留优先级，不会被其他同名或冲突文件覆盖或删除。<br>
-            <strong>删除安全：</strong>所有删除操作都会先备份到 <code>Mods/_deleted_backup/[时间戳]/</code>，可随时点击"撤销上次删除"恢复。
+            <strong>删除安全：</strong>所有删除操作都会先备份到 <code>桌面/Sims4YCC_Backups/[时间戳]/</code>（或你在设置中自定义的文件夹），可随时点击"撤销上次删除"恢复。
           </div>
           <!-- 勾选计数（手动模式） -->
           <div id="conflictSelectCount" class="conflict-select-count hidden">已勾选 <strong id="conflictSelectedNum">0</strong> 个文件待删除</div>
@@ -530,6 +531,21 @@
     <!-- 通用提示 -->
     <div id="toast" class="toast hidden"></div>
 
+    <!-- AI 对话侧边栏 -->
+    <div id="aiSidebar" class="ai-sidebar hidden">
+      <div class="ai-sidebar-header">
+        <span>🤖 AI 助手</span>
+        <button id="btnCloseAISidebar" class="ai-sidebar-close" title="关闭">×</button>
+      </div>
+      <div class="ai-sidebar-notice">复用设置中的翻译 API（DeepSeek/OpenAI 兼容接口）</div>
+      <div id="aiChatMessages" class="ai-chat-messages"></div>
+      <div class="ai-chat-input-area">
+        <textarea id="aiChatInput" class="ai-chat-input" rows="3" placeholder="例如：帮我停用所有重复的头发"></textarea>
+        <button id="btnSendAIChat" class="btn btn-primary ai-chat-send">发送</button>
+      </div>
+    </div>
+    <button id="btnToggleAISidebar" class="ai-sidebar-toggle" title="打开 AI 助手">🤖</button>
+
     <!-- MOD 详情面板：预览图 + 资源类型 -->
     <div id="modDetailModal" class="modal hidden">
       <div class="modal-content modal-large">
@@ -547,6 +563,10 @@
             <div class="mod-detail-info">
               <div class="mod-detail-name" id="modDetailName"></div>
               <div class="mod-detail-meta" id="modDetailMeta"></div>
+              <div style="margin:8px 0 12px;">
+                <button id="btnAIClassifyDetail" class="btn btn-sm btn-ai" title="使用 AI 判断该 MOD 应归属的分类（需配置 DeepSeek/OpenAI 兼容接口）">🤖 AI 识别分类</button>
+                <span id="aiClassifyResult" style="font-size:12px;color:var(--text-secondary);margin-left:8px;"></span>
+              </div>
               <h4 style="margin:12px 0 6px">包含资源类型</h4>
               <div id="modDetailResources" class="mod-detail-resources"></div>
             </div>

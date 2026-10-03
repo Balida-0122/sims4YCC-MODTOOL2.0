@@ -40,6 +40,9 @@ const appState = {
   conflictAutoPlanCache: null,  // 自动规划结果缓存 { plan, skippedGroups }
   conflictAutoDeletePaths: [],  // 弹窗确认时要执行删除的路径列表
   conflictManualDeletePaths: [],// 手动模式下弹窗确认时要删除的路径列表
+  // AI 助手
+  aiChatMessages: [],           // { role: 'user'|'assistant', content }
+  currentDetailFilePath: null,  // 当前打开的 MOD 详情文件路径
 };
 
 // ============ 工具函数 ============
@@ -313,6 +316,9 @@ function bindGlobalEvents() {
     });
   });
 
+  // AI 侧边栏
+  bindAISidebar();
+
   // 功能四：拖拽导入
   bindDragAndDrop();
 }
@@ -378,6 +384,7 @@ function bindDragAndDrop() {
 // ============ 功能一：MOD 详情面板 ============
 async function openModDetail(filePath) {
   if (!filePath) return;
+  appState.currentDetailFilePath = filePath;
   const modal = $('#modDetailModal');
   if (!modal) return;
   modal.classList.remove('hidden');
@@ -388,9 +395,11 @@ async function openModDetail(filePath) {
   $('#modDetailThumbSource').textContent = '';
   $('#modDetailResources').innerHTML = '<span class="loading"></span> 正在解析...';
   $('#modDetailMeta').textContent = filePath;
+  if ($('#aiClassifyResult')) $('#aiClassifyResult').textContent = '';
 
   try {
     const r = await api.getModDetail(filePath);
+    appState.currentDetailFileInfo = r;
     if (r.error) {
       $('#modDetailResources').innerHTML = `<span style="color:var(--danger)">${esc(r.error)}</span>`;
       $('#modDetailTitle').textContent = 'MOD 详情';
@@ -422,6 +431,150 @@ async function openModDetail(filePath) {
   } catch (e) {
     $('#modDetailResources').innerHTML = `<span style="color:var(--danger)">解析失败：${esc(e.message)}</span>`;
   }
+}
+
+// ============ AI 助手侧边栏 ============
+function bindAISidebar() {
+  const toggle = $('#btnToggleAISidebar');
+  const close = $('#btnCloseAISidebar');
+  const send = $('#btnSendAIChat');
+  const input = $('#aiChatInput');
+  if (toggle) toggle.addEventListener('click', openAISidebar);
+  if (close) close.addEventListener('click', closeAISidebar);
+  if (send) send.addEventListener('click', sendAIChat);
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAIChat();
+      }
+    });
+  }
+  // 详情页 AI 识别分类按钮
+  const btnClassify = $('#btnAIClassifyDetail');
+  if (btnClassify) {
+    btnClassify.addEventListener('click', async () => {
+      const filePath = appState.currentDetailFilePath;
+      const info = appState.currentDetailFileInfo;
+      if (!filePath) return;
+      const f = (appState.scanResults && appState.scanResults.files || []).find(x => x.path === filePath) || {};
+      const resultEl = $('#aiClassifyResult');
+      if (resultEl) resultEl.textContent = '识别中...';
+      btnClassify.disabled = true;
+      const res = await api.aiClassifyFile({
+        name: f.name || basename(filePath),
+        chineseName: f.chineseName || '',
+        author: f.author || '未知',
+        resourceTypes: info && info.resourceTypes ? info.resourceTypes : [],
+        size: f.size || 0,
+      });
+      btnClassify.disabled = false;
+      if (res.error) {
+        if (resultEl) resultEl.textContent = '识别失败：' + res.error;
+        toast(res.error, 'error');
+        return;
+      }
+      const catText = Array.isArray(res.category) && res.category.length > 0 ? res.category.join(' / ') : res.raw;
+      if (resultEl) resultEl.textContent = 'AI 建议分类：' + catText;
+      toast('AI 建议分类：' + catText, 'success');
+      addAIMessage('assistant', `对 **${f.name || basename(filePath)}** 的 AI 分类建议：\n\n${catText}\n\n你可以到"分类与打标签"页面应用此分类。`);
+      openAISidebar();
+    });
+  }
+}
+
+function openAISidebar() {
+  $('#aiSidebar').classList.remove('hidden');
+  $('#btnToggleAISidebar').classList.add('hidden');
+  renderAIChat();
+  const msgs = $('#aiChatMessages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function closeAISidebar() {
+  $('#aiSidebar').classList.add('hidden');
+  $('#btnToggleAISidebar').classList.remove('hidden');
+}
+
+function addAIMessage(role, content) {
+  appState.aiChatMessages.push({ role, content, time: Date.now() });
+  renderAIChat();
+  const msgs = $('#aiChatMessages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderAIChat() {
+  const container = $('#aiChatMessages');
+  if (!container) return;
+  if (appState.aiChatMessages.length === 0) {
+    container.innerHTML = '<div class="ai-chat-empty">你好，我是 Sims 4 MOD 管理 AI 助手。\n你可以问我关于 MOD 分类、冲突、停用、备份的问题，也可以让我分析冲突组或识别分类。</div>';
+    return;
+  }
+  container.innerHTML = appState.aiChatMessages.map(m => {
+    const isUser = m.role === 'user';
+    const avatar = isUser ? '👤' : '🤖';
+    const html = esc(m.content).replace(/\n/g, '<br>');
+    return `<div class="ai-chat-msg ${isUser ? 'user' : 'assistant'}"><div class="ai-chat-avatar">${avatar}</div><div class="ai-chat-bubble">${html}</div></div>`;
+  }).join('');
+}
+
+async function sendAIChat() {
+  const input = $('#aiChatInput');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addAIMessage('user', text);
+  // 尝试执行本地简单指令
+  const localResult = await handleAICommand(text);
+  if (localResult) {
+    addAIMessage('assistant', localResult);
+    return;
+  }
+  // 否则走 AI 对话
+  const messages = appState.aiChatMessages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: m.content }));
+  const res = await api.aiChat(messages);
+  if (res.error) {
+    addAIMessage('assistant', 'AI 调用失败：' + res.error);
+    return;
+  }
+  addAIMessage('assistant', res.reply);
+}
+
+// 本地命令解析：支持停用重复项、打开设置页等简单操作
+async function handleAICommand(text) {
+  const lower = text.toLowerCase();
+  // "停用所有重复的头发"
+  if (/停用|禁用|关闭/.test(lower) && /重复/.test(lower)) {
+    if (!appState.scanResults) return '请先执行深度扫描，我才能帮你处理重复文件。';
+    const dupFiles = (appState.scanResults.files || []).filter(f => {
+      if (!f.name) return false;
+      const name = f.name.toLowerCase();
+      const isHair = /hair|发型|头发/.test(name);
+      return isHair && /\(\d+\)|_dup|copy|副本/.test(name);
+    });
+    if (dupFiles.length === 0) return '没有找到疑似重复的头发 MOD。你可以先到"重复排查"页面查看重复组。';
+    const results = [];
+    for (const f of dupFiles) {
+      const r = await api.toggleMod(f.path, false);
+      results.push(r.ok ? `已停用：${f.name}` : `失败：${f.name} ${r.error || ''}`);
+    }
+    return `已处理 ${dupFiles.length} 个疑似重复的头发 MOD：\n${results.join('\n')}`;
+  }
+  // "打开设置"
+  if (/设置|配置/.test(lower) && /打开|进入|查看/.test(lower)) {
+    switchStep('settings');
+    return '已切换到设置页面，你可以在这里配置 AI API、备份路径等。';
+  }
+  // "扫描冲突"
+  if (/扫描.*冲突|冲突.*扫描|检测.*冲突/.test(lower)) {
+    switchStep('conflict');
+    scanConflicts();
+    return '已切换到冲突检测页面并开始扫描。';
+  }
+  return null;
 }
 
 // ============ 总览 ============
@@ -1027,6 +1180,34 @@ function bindConflictPage() {
   $('#btnConfirmAutoDelete').addEventListener('click', onConfirmAutoDelete);
   // 弹窗：确认手动删除
   $('#btnConfirmManualDelete').addEventListener('click', onConfirmManualDelete);
+
+  // AI 分析全部冲突
+  const btnAIAll = $('#btnAIAnalyzeAll');
+  if (btnAIAll) {
+    btnAIAll.addEventListener('click', async () => {
+      if (!conflictList || conflictList.length === 0) {
+        toast('请先扫描冲突', 'error');
+        return;
+      }
+      btnAIAll.disabled = true;
+      btnAIAll.textContent = '分析中...';
+      const results = [];
+      for (let i = 0; i < conflictList.length; i++) {
+        const group = conflictList[i];
+        btnAIAll.textContent = `分析中 ${i + 1}/${conflictList.length}`;
+        const res = await api.aiAnalyzeConflict(group);
+        if (res.ok) {
+          results.push(`**冲突 ${i + 1}**：${group.detail || '未命名冲突'}\n\n${res.analysis}`);
+        } else {
+          results.push(`**冲突 ${i + 1}**：${group.detail || '未命名冲突'}\n\n分析失败：${res.error}`);
+        }
+      }
+      btnAIAll.disabled = false;
+      btnAIAll.textContent = '🤖 AI 分析全部';
+      addAIMessage('assistant', results.join('\n\n---\n\n'));
+      openAISidebar();
+    });
+  }
 }
 
 let conflictList = [];
@@ -1172,6 +1353,7 @@ function renderConflicts() {
           ${c.hasAnchored ? '<span class="anchor-badge">含锚定·最高优先</span>' : ''}
           ${mode === 'manual' && groupSelectable > 0 ? `<span class="count-text">本组已选 ${groupSelected}/${groupSelectable}</span>` : ''}
           <button class="btn btn-sm" data-whitelist="${esc(c.key)}">加入白名单</button>
+          <button class="btn btn-sm btn-ai" data-ai-analyze-group="${gi}" title="使用 AI 分析此冲突组">🤖 AI 分析</button>
         </div>
       </div>
       <div class="conflict-meta">
@@ -1277,7 +1459,7 @@ function renderConflicts() {
   area.querySelectorAll('[data-delconflict]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const filePath = btn.dataset.delconflict;
-      const confirmMsg = `是否确认删除该文件？\n\n删除前会先备份到 Mods/_deleted_backup/，可通过"撤销上次删除"恢复。\n\n${filePath}`;
+      const confirmMsg = `是否确认删除该文件？\n\n删除前会先备份到桌面/Sims4YCC_Backups/（或自定义备份文件夹），可通过"撤销上次删除"恢复。\n\n${filePath}`;
       if (!confirm(confirmMsg)) return;
       btn.disabled = true;
       const r = await api.deleteConflictFile(filePath);
@@ -1303,6 +1485,26 @@ function renderConflicts() {
       updateConflictSelectedCount();
     });
   });
+  // 绑定：AI 分析单组冲突
+  area.querySelectorAll('[data-ai-analyze-group]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const gi = parseInt(btn.dataset.aiAnalyzeGroup, 10);
+      const group = conflictList[gi];
+      if (!group) return;
+      btn.disabled = true;
+      btn.textContent = '分析中...';
+      const res = await api.aiAnalyzeConflict(group);
+      btn.disabled = false;
+      btn.textContent = '🤖 AI 分析';
+      if (res.error) {
+        toast(res.error, 'error');
+        return;
+      }
+      addAIMessage('assistant', `**冲突分析**（${group.detail || '冲突组'}）\n\n${res.analysis}`);
+      openAISidebar();
+    });
+  });
+
   bindLocateButtons(area);
 }
 
